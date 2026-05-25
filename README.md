@@ -35,13 +35,13 @@ The project implements a hybrid architecture:
 
 ```mermaid
 graph TD
-    subgraph Control Plane
-        DesktopClient[Desktop Client] -- "REST / HTTPS" --> Server[Server]
-        AndroidClient[Android / Termux Client] -- "Custom Socket Protocol (CSP)" --> Server
+    subgraph ControlPlane ["Control Plane"]
+        DesktopClient["Desktop Client"] -->|REST / HTTPS| Server["Server"]
+        AndroidClient["Android / Termux Client"] -->|Custom Socket Protocol (CSP)| Server
     end
 
-    subgraph Data Plane (P2P)
-        DesktopClient -- "Song Transfer Protocol (STP) / TCP" --> AndroidClient
+    subgraph DataPlaneP2P ["Data Plane (P2P)"]
+        DesktopClient -->|Song Transfer Protocol (STP) / TCP| AndroidClient
     end
 ```
 
@@ -75,7 +75,7 @@ The server acts as the coordinator and discovery registry. It is structured into
 ├─────────────────────────────────────────┤
 │        Application Services Layer       │  <-- Auth, Session, Discovery, Pub/Sub, Transfer Neg.
 ├─────────────────────────────────────────┤
-│              Database Layer             │  <-- SQLite (Dev) / PostgreSQL (Prod)
+│              Database Layer             │  <-- SQLite
 └─────────────────────────────────────────┘
 ```
 
@@ -96,11 +96,11 @@ Parses incoming packets, validates protocol message types, and dispatches them t
 ### 3. Security Layer
 Validates sessions and handles peer authorizations. It manages three key token classes:
 
-| Token Type | Purpose | Format / Example | Lifetime | Storage Location |
+| Token Type | Purpose | Token Format | Lifetime | Storage Location |
 | :--- | :--- | :--- | :--- | :--- |
 | **Access Token** | General control plane requests validation | JWT | 10–15 Minutes | Client memory / local file |
-| **Session Token** | Refreshing expired access tokens | Random string (e.g., `SESS_A12F44B7`) | 7–14 Days | Client file & Server DB |
-| **Peer Token** | Authorizing specific client-to-client transfers | Random short token (e.g., `TRX_991A`) | 1–5 Minutes | Server SQL |
+| **Session Token** | Refreshing expired access tokens | Random string | 7–14 Days | Client file & Server DB |
+| **Peer Token** | Authorizing specific client-to-client transfers | Random short token | 1–5 Minutes | Server SQLite DB |
 
 ### 4. Application Services Layer
 - **Authentication Service:** Registration, Login, Logout, Password verification.
@@ -112,9 +112,8 @@ Validates sessions and handles peer authorizations. It manages three key token c
 - **Transfer Negotiation Service:** Resolves `DOWNLOAD_REQ` requests, checks peer availability, and generates a short-lived `peer_token` containing direct connection info (`peer_id`, `peer_ip`, `peer_port`, `peer_token`) to initiate direct client-to-client connections.
 
 ### 5. Database Layer
-Uses standard SQL for relational database schemas.
-- **Development:** SQLite
-- **Production:** PostgreSQL (Future support)
+Uses SQLite for relational database schemas.
+- **Database:** SQLite
 - **Key Tables:** `users`, `profiles`, `sessions`, `peer_registry`, `music_metadata`, `publish_history`, `download_history`, `logs`, `peer_tokens`, `transfer_negotiation`.
 
 ---
@@ -163,13 +162,7 @@ client/
 
 #### Android Client (Custom Socket Protocol - CSP)
 A message-based socket protocol utilizing JSON payloads.
-```json
-// Example LOGIN_REQ payload
-{
-    "msg_type": "LOGIN_REQ",
-    "username": "android"
-}
-```
+
 *Supported Messages:* `LOGIN_REQ`, `REGISTER_REQ`, `PUBLISH_REQ`, `SUBSCRIBE_REQ`, `DISCOVERY_REQ`, `DOWNLOAD_REQ`, `HEARTBEAT`, `ACK`, `NACK`.
 
 ---
@@ -222,5 +215,5 @@ The **Song Transfer Protocol (STP)** is a custom protocol operating over TCP for
 | **Android Client CLI** | Python CLI / Termux | Command-Line Interface client |
 | **Desktop Control Plane** | HTTPS / REST (`requests` or `httpx`) | HTTP client operations |
 | **Android Control Plane** | Custom Socket Protocol (CSP) / TCP | Custom TCP Socket (or `aioquic` for QUIC) |
-| **Server Database** | SQLite (Dev) / PostgreSQL (Prod) | Central SQL database |
+| **Server Database** | SQLite | Central SQL database |
 | **Peer Data Plane** | TCP / STP | Song Transfer Protocol |
