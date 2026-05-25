@@ -6,7 +6,7 @@ Global configuration for Desktop Client.
 import os
 
 # ── Server ──────────────────────────────────────────────────────────────────
-SERVER_BASE_URL = os.environ.get("SERVER_BASE_URL", "https://localhost:8443")
+SERVER_BASE_URL = os.environ.get("SERVER_BASE_URL", "https://100.98.237.27:8443")
 
 # ── Local storage paths ──────────────────────────────────────────────────────
 BASE_DIR        = os.path.join(os.path.dirname(__file__), "client")
