@@ -38,17 +38,17 @@ graph TD
     %% Nodes
     DesktopClient["Desktop Client"]
     Server["Server"]
-    AndroidClient["Android / Termux Client"]
+    AndroidClient["Android/Termux Client"]
 
     %% Force vertical ranking
     DesktopClient ~~~ Server ~~~ AndroidClient
 
     %% Control Plane (Solid lines)
-    DesktopClient -->|"[Control Plane] REST / HTTPS"| Server
-    AndroidClient -->|"[Control Plane] CSP / QUIC"| Server
+    DesktopClient -->|"REST/HTTPS: Control Plane"| Server
+    AndroidClient -->|"CSP/QUIC: Control Plane"| Server
 
     %% Data Plane (Dotted line)
-    DesktopClient -.->|"[Data Plane] STP / TCP"| AndroidClient
+    DesktopClient -.->|"STP/TCP: Data Plane"| AndroidClient
 ```
 
 ---
