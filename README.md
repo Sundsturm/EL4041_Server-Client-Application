@@ -37,11 +37,11 @@ The project implements a hybrid architecture:
 graph TD
     subgraph ControlPlane ["Control Plane"]
         DesktopClient["Desktop Client"] -->|REST / HTTPS| Server["Server"]
-        AndroidClient["Android / Termux Client"] -->|Custom Socket Protocol (CSP)| Server
+        AndroidClient["Android / Termux Client"] -->|Custom Socket Protocol - CSP / QUIC| Server
     end
 
     subgraph DataPlaneP2P ["Data Plane (P2P)"]
-        DesktopClient -->|Song Transfer Protocol (STP) / TCP| AndroidClient
+        DesktopClient -->|Song Transfer Protocol - STP / TCP| AndroidClient
     end
 ```
 
@@ -81,7 +81,7 @@ The server acts as the coordinator and discovery registry. It is structured into
 
 ### 1. Network Interface Layer
 - **Desktop (HTTPS):** Accepts REST requests from the Desktop Client.
-- **Android (CSP/TCP):** Accepts custom socket connections. Supports a future upgrade path to QUIC.
+- **Android (CSP/QUIC):** Accepts custom socket connections over QUIC using the `aioquic` library.
 - **Components:** REST Listener, Socket Listener, Request Dispatcher.
 
 ### 2. Message Router Layer
@@ -214,6 +214,6 @@ The **Song Transfer Protocol (STP)** is a custom protocol operating over TCP for
 | **Desktop Client UI** | PySide6 (Qt6) | GUI Framework |
 | **Android Client CLI** | Python CLI / Termux | Command-Line Interface client |
 | **Desktop Control Plane** | HTTPS / REST (`requests` or `httpx`) | HTTP client operations |
-| **Android Control Plane** | Custom Socket Protocol (CSP) / TCP | Custom TCP Socket (or `aioquic` for QUIC) |
+| **Android Control Plane** | Custom Socket Protocol (CSP) / QUIC | Custom QUIC Socket via `aioquic` |
 | **Server Database** | SQLite | Central SQL database |
 | **Peer Data Plane** | TCP / STP | Song Transfer Protocol |
