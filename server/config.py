@@ -23,7 +23,7 @@ QUIC_PORT: int = int(os.getenv("QUIC_PORT", "4433"))
 # Replace with the actual Tailscale MagicDNS hostname of the server machine.
 # Run: tailscale status   to find your hostname.
 TAILSCALE_HOSTNAME: str = os.getenv(
-    "TAILSCALE_HOSTNAME", "my-server.tail12345.ts.net"
+    "TAILSCALE_HOSTNAME", "laptop-8v06emvk.tail964715.ts.net"
 )
 
 CERT_PATH: str = os.getenv(

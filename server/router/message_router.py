@@ -108,6 +108,9 @@ async def dispatch(
             peer_id=payload.get("peer_id", ""),
         )
 
+    if msg_type == "PEERS_LIST_REQ":
+        return await peer_service.list_online_peers()
+
     if msg_type == "HEARTBEAT":
         return await peer_service.heartbeat(user_id=user_id)
 
