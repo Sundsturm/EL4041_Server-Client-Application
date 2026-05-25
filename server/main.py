@@ -44,11 +44,17 @@ async def main() -> None:
         print("\n[Server] Shutdown signal received.")
         shutdown_event.set()
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     if sys.platform != "win32":
-        # POSIX signal handling
+        # POSIX: asyncio-native signal handling
         loop.add_signal_handler(signal.SIGINT, _signal_handler)
         loop.add_signal_handler(signal.SIGTERM, _signal_handler)
+    else:
+        # Windows: synchronous signal handler that schedules into the event loop
+        def _win_sigint(sig, frame) -> None:  # noqa: ANN001
+            loop.call_soon_threadsafe(_signal_handler)
+        signal.signal(signal.SIGINT, _win_sigint)
+        signal.signal(signal.SIGTERM, _win_sigint)
 
     # 4. Start all tasks concurrently
     tasks = [
@@ -92,3 +98,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+    finally:
+        # Ensure the terminal cursor/prompt returns to a clean new line
+        # (important for Git Bash / MSYS2 on Windows)
+        print("")

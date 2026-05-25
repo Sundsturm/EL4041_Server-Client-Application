@@ -108,3 +108,20 @@ async def heartbeat(user_id: str) -> dict:
     )
     await db.commit()
     return ok({"last_seen": now})
+
+
+async def list_online_peers() -> dict:
+    """Return all currently online peers in the registry."""
+    db = await get_db()
+    async with db.execute(
+        """
+        SELECT pr.peer_id, pr.user_id, pr.tailscale_ip, pr.port,
+               pr.status, pr.last_seen, u.username
+        FROM peer_registry pr
+        JOIN users u ON u.user_id = pr.user_id
+        WHERE pr.status = 'online'
+        ORDER BY pr.last_seen DESC
+        """,
+    ) as cur:
+        rows = await cur.fetchall()
+    return ok({"peers": [dict(r) for r in rows]})

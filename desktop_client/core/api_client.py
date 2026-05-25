@@ -78,12 +78,18 @@ class APIClient:
     @staticmethod
     def _handle(resp: httpx.Response) -> Any:
         try:
-            data = resp.json()
+            body = resp.json()
         except Exception:
-            data = {"detail": resp.text}
+            body = {"detail": resp.text}
         if resp.is_success:
-            return data
-        msg = data.get("detail") or data.get("message") or str(data)
+            # Server wraps all responses in {"status", "data", "message"}.
+            # Unwrap the inner "data" dict so callers get a flat dict.
+            if isinstance(body, dict) and "status" in body:
+                if body.get("status") == "error":
+                    raise APIError(body.get("message") or str(body), resp.status_code)
+                return body.get("data") or {}
+            return body
+        msg = body.get("detail") or body.get("message") or str(body)
         raise APIError(msg, resp.status_code)
 
     # ─── Auth endpoints ───────────────────────────────────────────────────────
@@ -98,19 +104,20 @@ class APIClient:
     async def login(self, username: str, password: str) -> dict:
         """
         POST /login
-        Returns: { access_token, session_token, user_id, username }
+        Server returns envelope: { status, data: { access_token, session_token, user_id }, message }
+        _handle() unwraps to the inner data dict automatically.
         """
         data = await self._post("/login", {
             "username": username,
             "password": password,
         }, auth=False)
         print("LOGIN RESPONSE:", data)
-        # Persist tokens
+        # Persist tokens (data is already unwrapped inner dict)
         self._auth.save_access_token(data["access_token"])
         self._auth.save_session_token(data["session_token"])
         self._auth.save_profile({
             "user_id":  data.get("user_id"),
-            "username": data.get("username", username),
+            "username": username,   # server does not echo username, use the one we sent
         })
         return data
 
@@ -124,10 +131,10 @@ class APIClient:
 
     async def refresh_session(self, session_token: str) -> dict:
         """
-        POST /refresh
+        POST /session/refresh
         Exchanges session token for a new access token.
         """
-        data = await self._post("/refresh", {
+        data = await self._post("/session/refresh", {
             "session_token": session_token,
         }, auth=False)
         self._auth.save_access_token(data["access_token"])
@@ -161,5 +168,9 @@ class APIClient:
     # ─── Peer status ─────────────────────────────────────────────────────────
 
     async def get_peers(self) -> dict:
-        """GET /peers"""
+        """GET /peers — list all online peers from the server registry."""
         return await self._get("/peers")
+
+    async def get_peer_status(self, peer_id: str) -> dict:
+        """GET /peer/status/{peer_id}"""
+        return await self._get(f"/peer/status/{peer_id}")

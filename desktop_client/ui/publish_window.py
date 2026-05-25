@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QFrame,
 )
 
-from config import SUPPORTED_MIME_TYPES
+from config import SUPPORTED_MIME_TYPES, STP_LISTEN_PORT
 
 
 def _sha256(path: str) -> str:
@@ -152,7 +152,8 @@ class PublishWindow(QWidget):
             "filename":  os.path.basename(self._file_path),
             "mime_type": mime,
             "size":      os.path.getsize(self._file_path),
-            "hash":      self._lbl_hash.text().replace("sha256: ", ""),
+            "hmac_hash": self._lbl_hash.text().replace("sha256: ", ""),  # BUG 2 fix: was 'hash'
+            "stp_port":  STP_LISTEN_PORT,   # BUG 3 fix: required by server PublishRequest
             "title":     self._txt_title.text().strip(),
             "artist":    self._txt_artist.text().strip(),
             "local_path": self._file_path,

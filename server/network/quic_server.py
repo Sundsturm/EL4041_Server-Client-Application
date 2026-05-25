@@ -193,16 +193,26 @@ async def run_quic_server() -> None:
     """
     Start the QUIC/UDP server.  This coroutine runs indefinitely until cancelled.
     Called as an asyncio task from main.py.
+
+    Note: newer aioquic versions return a QuicServer from serve() that does NOT
+    support the async context manager protocol.  We therefore call serve() with
+    await and keep the server alive by waiting on a never-set asyncio.Event.
     """
+    import asyncio
+
     configuration = build_quic_configuration()
-    async with await serve(
+    server = await serve(
         host=config.QUIC_HOST,
         port=config.QUIC_PORT,
         configuration=configuration,
         create_protocol=CSPServerProtocol,
-    ) as server:
-        print(
-            f"[QUIC] CSP server listening on "
-            f"udp://{config.QUIC_HOST}:{config.QUIC_PORT}"
-        )
-        await server.wait_closed()
+    )
+    print(
+        f"[QUIC] CSP server listening on "
+        f"udp://{config.QUIC_HOST}:{config.QUIC_PORT}"
+    )
+    # Block until this task is cancelled (e.g. on server shutdown)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        server.close()

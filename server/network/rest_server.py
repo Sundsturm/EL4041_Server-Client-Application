@@ -194,6 +194,12 @@ async def verify_peer_token_endpoint(body: VerifyTokenRequest):
     return await dispatch("SESSION_VERIFY", body.model_dump())
 
 
+@app.get("/peers")
+async def list_peers(user_id: str = Depends(get_current_user)):
+    """Return all currently online peers (used by desktop client peer tab)."""
+    return await dispatch("PEERS_LIST_REQ", {}, user_id=user_id)
+
+
 @app.get("/peer/status/{peer_id}")
 async def peer_status(peer_id: str, user_id: str = Depends(get_current_user)):
     return await dispatch("PEER_STATUS_REQ", {"peer_id": peer_id}, user_id=user_id)
