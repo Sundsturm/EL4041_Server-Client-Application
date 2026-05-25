@@ -1,0 +1,6 @@
+{
+  "server_url": "https://localhost:8443",
+  "stp_listen_port": 55000,
+  "chunk_kb": 64,
+  "tls_verify": false
+}
