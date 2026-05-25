@@ -35,14 +35,20 @@ The project implements a hybrid architecture:
 
 ```mermaid
 graph TD
-    subgraph ControlPlane ["Control Plane"]
-        DesktopClient["Desktop Client"] -->|REST / HTTPS| Server["Server"]
-        AndroidClient["Android / Termux Client"] -->|Custom Socket Protocol - CSP / QUIC| Server
-    end
+    %% Nodes
+    DesktopClient["Desktop Client"]
+    Server["Server"]
+    AndroidClient["Android / Termux Client"]
 
-    subgraph DataPlaneP2P ["Data Plane (P2P)"]
-        DesktopClient -->|Song Transfer Protocol - STP / TCP| AndroidClient
-    end
+    %% Force vertical ranking
+    DesktopClient ~~~ Server ~~~ AndroidClient
+
+    %% Control Plane (Solid lines)
+    DesktopClient -->|"[Control Plane] REST / HTTPS"| Server
+    AndroidClient -->|"[Control Plane] CSP / QUIC"| Server
+
+    %% Data Plane (Dotted line)
+    DesktopClient -.->|"[Data Plane] STP / TCP"| AndroidClient
 ```
 
 ---
