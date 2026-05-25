@@ -104,6 +104,7 @@ class APIClient:
             "username": username,
             "password": password,
         }, auth=False)
+        print("LOGIN RESPONSE:", data)
         # Persist tokens
         self._auth.save_access_token(data["access_token"])
         self._auth.save_session_token(data["session_token"])
