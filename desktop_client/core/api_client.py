@@ -64,13 +64,15 @@ class APIClient:
                     pass  # Caller will receive 401 and handle it
 
     async def _get(self, path: str, params: dict = None, auth: bool = True) -> Any:
-        await self._ensure_fresh_token()
+        if auth:
+            await self._ensure_fresh_token()
         headers = self._auth_headers() if auth else {}
         resp = await self._client.get(path, params=params, headers=headers)
         return self._handle(resp)
 
     async def _post(self, path: str, body: dict = None, auth: bool = True) -> Any:
-        await self._ensure_fresh_token()
+        if auth:
+            await self._ensure_fresh_token()
         headers = self._auth_headers() if auth else {}
         resp = await self._client.post(path, json=body or {}, headers=headers)
         return self._handle(resp)
