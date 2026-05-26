@@ -12,6 +12,7 @@ from server import config
 from server.database import get_db
 from server.models.schemas import err, ok
 from server.security import jwt_handler, token_store
+from server.services import logging_service
 
 
 def _utcnow_iso() -> str:
@@ -39,6 +40,7 @@ async def refresh(session_token: str) -> dict:
     access_token = jwt_handler.generate_access_token(
         info.user_id, row["username"], info.jwt_secret
     )
+    await logging_service.log_session("REFRESH", info.user_id)
     return ok({"access_token": access_token}, "Token refreshed.")
 
 
@@ -74,6 +76,8 @@ async def expire_stale_sessions() -> None:
         (now,),
     )
     await db.commit()
+    await logging_service.log("INFO", "session",
+                              "CLEANUP       | stale sessions expired")
 
 
 async def cleanup_loop() -> None:

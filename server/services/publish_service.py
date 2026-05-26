@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from server.database import get_db
 from server.models.schemas import err, ok
+from server.services import logging_service
 
 
 def _utcnow_iso() -> str:
@@ -64,6 +65,7 @@ async def publish(user_id: str, metadata: dict) -> dict:
     )
     await db.commit()
 
+    await logging_service.log_publish(user_id, music_id, filename)
     return ok({"music_id": music_id, "stp_port": stp_port}, "Song published.")
 
 

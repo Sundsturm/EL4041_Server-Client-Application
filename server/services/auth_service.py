@@ -15,6 +15,7 @@ import bcrypt
 from server.database import get_db
 from server.models.schemas import err, ok
 from server.security import jwt_handler, token_store
+from server.services import logging_service
 
 
 def _utcnow_iso() -> str:
@@ -32,6 +33,8 @@ async def register(username: str, password: str, display_name: str | None = None
     # Check uniqueness
     async with db.execute("SELECT user_id FROM users WHERE username=?", (username,)) as cur:
         if await cur.fetchone():
+            await logging_service.log_register(username, "", success=False,
+                                               reason="Username already taken")
             return err("Username already taken.")
 
     user_id = str(uuid.uuid4())
@@ -48,6 +51,7 @@ async def register(username: str, password: str, display_name: str | None = None
     )
     await db.commit()
 
+    await logging_service.log_register(username, user_id, success=True)
     return ok({"user_id": user_id}, "Registration successful.")
 
 
@@ -63,9 +67,13 @@ async def login(username: str, password: str) -> dict:
         row = await cur.fetchone()
 
     if row is None:
+        await logging_service.log_login(username, "", success=False,
+                                        reason="User not found")
         return err("Invalid username or password.")
 
     if not bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
+        await logging_service.log_login(username, row["user_id"], success=False,
+                                        reason="Wrong password")
         return err("Invalid username or password.")
 
     user_id = row["user_id"]
@@ -76,6 +84,7 @@ async def login(username: str, password: str) -> dict:
     # Issue access token
     access_token = jwt_handler.generate_access_token(user_id, username, jwt_secret)
 
+    await logging_service.log_login(username, user_id, success=True)
     return ok(
         {
             "user_id": user_id,
@@ -93,7 +102,10 @@ async def logout(session_token: str) -> dict:
     """
     info = await token_store.verify_session_token(session_token)
     if info is None:
+        await logging_service.log("WARNING", "auth",
+                                  "LOGOUT FAIL   | session not found or already revoked")
         return err("Session not found or already revoked.")
 
     await token_store.revoke_session_token(session_token)
+    await logging_service.log_logout(info.user_id, session_token)
     return ok(message="Logged out successfully.")

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from server.database import get_db
 from server.models.schemas import err, ok
+from server.services import logging_service
 
 
 def _utcnow_iso() -> str:
@@ -43,6 +44,7 @@ async def register_peer(
         (peer_id, user_id, tailscale_ip, port, now),
     )
     await db.commit()
+    await logging_service.log_peer("REGISTER", user_id, peer_id, tailscale_ip, port)
     return ok({"peer_id": peer_id}, "Peer registered.")
 
 
@@ -54,6 +56,7 @@ async def unregister_peer(user_id: str) -> dict:
         "UPDATE peer_registry SET status='offline' WHERE peer_id=?", (peer_id,)
     )
     await db.commit()
+    await logging_service.log_peer("UNREGISTER", user_id, peer_id)
     return ok(message="Peer unregistered.")
 
 
@@ -107,6 +110,7 @@ async def heartbeat(user_id: str) -> dict:
         (now, peer_id),
     )
     await db.commit()
+    await logging_service.log_peer("HEARTBEAT", user_id, peer_id)
     return ok({"last_seen": now})
 
 
