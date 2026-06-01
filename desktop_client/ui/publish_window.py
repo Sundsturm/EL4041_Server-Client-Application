@@ -3,6 +3,7 @@ ui/publish_window.py
 Publish a song: pick file, compute metadata, POST to server.
 """
 
+from curses import meta
 import hashlib
 import os
 
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from config import SUPPORTED_MIME_TYPES, STP_LISTEN_PORT
+from core.audio_metadata import extract_metadata
 
 
 def _sha256(path: str) -> str:
@@ -60,14 +62,23 @@ class PublishWindow(QWidget):
         lay.addLayout(file_row)
 
         # Metadata fields
-        self._txt_title  = QLineEdit()
+        self._txt_title = QLineEdit()
         self._txt_title.setPlaceholderText("track title (optional)")
+
         self._txt_artist = QLineEdit()
         self._txt_artist.setPlaceholderText("artist (optional)")
+
+        self._txt_album = QLineEdit()
+        self._txt_album.setPlaceholderText("album (optional)")
+
         lay.addWidget(QLabel("Title"))
         lay.addWidget(self._txt_title)
+
         lay.addWidget(QLabel("Artist"))
         lay.addWidget(self._txt_artist)
+
+        lay.addWidget(QLabel("Album"))
+        lay.addWidget(self._txt_album)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
@@ -78,7 +89,8 @@ class PublishWindow(QWidget):
         self._lbl_size = QLabel("size: —")
         self._lbl_hash = QLabel("sha256: —")
         self._lbl_mime = QLabel("mime: —")
-        for lbl in (self._lbl_size, self._lbl_hash, self._lbl_mime):
+        self._lbl_duration = QLabel("duration: —")
+        for lbl in (self._lbl_size, self._lbl_hash, self._lbl_mime, self._lbl_duration):
             lbl.setObjectName("subtitle")
             lay.addWidget(lbl)
 
@@ -106,36 +118,85 @@ class PublishWindow(QWidget):
 
     def _browse(self):
         exts = " ".join(f"*{e}" for e in SUPPORTED_MIME_TYPES)
+
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Audio File", "",
+            self,
+            "Select Audio File",
+            "",
             f"Audio Files ({exts});;All Files (*)"
         )
+
         if not path:
             return
+
         self._file_path = path
         self._txt_file.setText(path)
 
-        # Auto-fill title from filename
-        base = os.path.splitext(os.path.basename(path))[0]
-        if not self._txt_title.text():
+        # ==========================
+        # Read metadata from audio
+        # ==========================
+        meta = extract_metadata(path)
+
+        # Title
+        if meta.get("title"):
+            self._txt_title.setText(meta["title"])
+        else:
+            base = os.path.splitext(os.path.basename(path))[0]
             self._txt_title.setText(base)
 
-        # Compute metadata
+        # Artist
+        if meta.get("artist"):
+            self._txt_artist.setText(meta["artist"])
+
+        if meta.get("album"):
+            self._txt_album.setText(meta["album"])
+
+        # ==========================
+        # File info
+        # ==========================
         size = os.path.getsize(path)
-        ext  = os.path.splitext(path)[1].lower()
-        mime = SUPPORTED_MIME_TYPES.get(ext, "application/octet-stream")
 
-        self._lbl_size.setText(f"size: {size:,} bytes ({size / 1024 / 1024:.2f} MB)")
-        self._lbl_mime.setText(f"mime: {mime}")
+        ext = os.path.splitext(path)[1].lower()
+        mime = SUPPORTED_MIME_TYPES.get(
+            ext,
+            "application/octet-stream"
+        )
 
-        # Hash computation can be slow for large files — run in thread
-        self._lbl_hash.setText("sha256: computing...")
+        self._lbl_size.setText(
+            f"size: {size:,} bytes ({size / 1024 / 1024:.2f} MB)"
+        )
+
+        self._lbl_mime.setText(
+            f"mime: {mime}"
+        )
+
+        # ==========================
+        # Duration
+        # ==========================
+        duration = meta.get("duration", 0)
+
+        minutes = duration // 60
+        seconds = duration % 60
+
+        self._lbl_duration.setText(
+            f"duration: {minutes:02d}:{seconds:02d}"
+        )
+
+        # ==========================
+        # SHA256 hash
+        # ==========================
+        self._lbl_hash.setText(
+            "sha256: computing..."
+        )
+
         self._btn_publish.setEnabled(False)
+
         self._progress.setVisible(True)
 
-        from PySide6.QtCore import QThread
         self._hash_worker = _HashWorker(path)
-        self._hash_worker.done.connect(self._on_hash_done)
+        self._hash_worker.done.connect(
+            self._on_hash_done
+        )
         self._hash_worker.start()
 
     def _on_hash_done(self, digest: str):
@@ -154,8 +215,9 @@ class PublishWindow(QWidget):
             "size":      os.path.getsize(self._file_path),
             "hmac_hash": self._lbl_hash.text().replace("sha256: ", ""),  # BUG 2 fix: was 'hash'
             "stp_port":  STP_LISTEN_PORT,   # BUG 3 fix: required by server PublishRequest
-            "title":     self._txt_title.text().strip(),
-            "artist":    self._txt_artist.text().strip(),
+            "title": self._txt_title.text().strip(),
+            "artist": self._txt_artist.text().strip(),
+            "album": self._txt_album.text().strip(),
             "local_path": self._file_path,
         }
         self.publish_requested.emit(metadata)
