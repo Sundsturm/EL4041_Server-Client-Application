@@ -40,6 +40,7 @@ from ui.search_window import SearchWindow
 from ui.transfer_window import TransferWindow
 from ui.history_window import HistoryWindow
 from ui.peer_status_window import PeerStatusWindow
+from ui.edit_profile_dialog import EditProfileDialog, DeleteProfileDialog
 
 
 NAV_ITEMS = [
@@ -119,6 +120,18 @@ class MainWindow(QMainWindow):
         )
         self._lbl_user.setWordWrap(True)
         sb_lay.addWidget(self._lbl_user)
+
+        self._btn_edit_profile = QPushButton("EDIT PROFILE")
+        self._btn_edit_profile.setObjectName("nav")
+        self._btn_edit_profile.setEnabled(False)
+        self._btn_edit_profile.clicked.connect(self._on_edit_profile)
+        sb_lay.addWidget(self._btn_edit_profile)
+
+        self._btn_delete_profile = QPushButton("DELETE PROFILE")
+        self._btn_delete_profile.setObjectName("nav")
+        self._btn_delete_profile.setEnabled(False)
+        self._btn_delete_profile.clicked.connect(self._on_delete_profile)
+        sb_lay.addWidget(self._btn_delete_profile)
 
         self._btn_logout = QPushButton("SIGN OUT")
         self._btn_logout.setObjectName("nav")
@@ -257,6 +270,8 @@ class MainWindow(QMainWindow):
             "border-top: 1px solid #1A1A1A; letter-spacing: 1px;"
         )
         self._btn_logout.setEnabled(True)
+        self._btn_edit_profile.setEnabled(True)
+        self._btn_delete_profile.setEnabled(True)
         self._status(f"welcome, {username}")
 
     def _on_logout(self):
@@ -267,8 +282,138 @@ class MainWindow(QMainWindow):
             "border-top: 1px solid #1A1A1A; letter-spacing: 1px;"
         )
         self._btn_logout.setEnabled(False)
+        self._btn_edit_profile.setEnabled(False)
+        self._btn_delete_profile.setEnabled(False)
         self._status("signed out")
         QTimer.singleShot(500, self._show_login)
+
+    # ─── Profile ─────────────────────────────────────────────────────────────
+
+    def _on_edit_profile(self):
+        username = self._auth.get_username()
+        future = self._tm.submit_api(self._api.get_profile())
+        self._status("loading profile...")
+
+        def _check():
+            if future.done():
+                timer.stop()
+                try:
+                    data = future.result()
+                    profile = data.get("profile", {})
+
+                    dlg = EditProfileDialog(
+                        username=profile.get("username", username),
+                        display_name=profile.get("display_name", ""),
+                        bio=profile.get("bio", ""),
+                        parent=self,
+                    )
+
+                    if not dlg.exec():
+                        self._status("profile edit cancelled")
+                        return
+
+                    payload = dlg.data()
+                    update_future = self._tm.submit_api(
+                        self._api.update_profile(
+                            display_name=payload["display_name"],
+                            bio=payload["bio"],
+                            password=payload["password"],
+                        )
+                    )
+                    self._status("updating profile...")
+
+                    def _check_update():
+                        if update_future.done():
+                            update_timer.stop()
+                            try:
+                                update_future.result()
+                                self._status("profile updated")
+                                QMessageBox.information(
+                                    self,
+                                    "Profile Updated",
+                                    "Your profile has been updated."
+                                )
+                            except APIError as e:
+                                self._status(str(e), error=True)
+                                QMessageBox.warning(
+                                    self,
+                                    "Update Failed",
+                                    str(e)
+                                )
+
+                    update_timer = QTimer(self)
+                    update_timer.timeout.connect(_check_update)
+                    update_timer.start(300)
+
+                except APIError as e:
+                    self._status(str(e), error=True)
+                    QMessageBox.warning(
+                        self,
+                        "Profile Error",
+                        str(e)
+                    )
+
+        timer = QTimer(self)
+        timer.timeout.connect(_check)
+        timer.start(300)
+
+    def _on_delete_profile(self):
+        username = self._auth.get_username()
+        dlg = DeleteProfileDialog(username=username, parent=self)
+
+        if not dlg.exec():
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            "Are you absolutely sure you want to delete this account?"
+        )
+
+        if confirm != QMessageBox.Yes:
+            return
+
+        future = self._tm.submit_api(
+            self._api.delete_profile(dlg.password())
+        )
+        self._status("deleting account...")
+
+        def _check():
+            if future.done():
+                timer.stop()
+                try:
+                    future.result()
+
+                    self._lbl_user.setText("not signed in")
+                    self._lbl_user.setStyleSheet(
+                        "color: #444; font-size: 10px; padding: 12px 16px; "
+                        "border-top: 1px solid #1A1A1A; letter-spacing: 1px;"
+                    )
+
+                    self._btn_logout.setEnabled(False)
+                    self._btn_edit_profile.setEnabled(False)
+                    self._btn_delete_profile.setEnabled(False)
+
+                    QMessageBox.information(
+                        self,
+                        "Account Deleted",
+                        "Your account has been deleted."
+                    )
+
+                    self._status("account deleted")
+                    QTimer.singleShot(500, self._show_login)
+
+                except APIError as e:
+                    self._status(str(e), error=True)
+                    QMessageBox.warning(
+                        self,
+                        "Delete Failed",
+                        str(e)
+                    )
+
+        timer = QTimer(self)
+        timer.timeout.connect(_check)
+        timer.start(300)
 
     # ─── Search ──────────────────────────────────────────────────────────────
 

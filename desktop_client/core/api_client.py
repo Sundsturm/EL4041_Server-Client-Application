@@ -142,6 +142,40 @@ class APIClient:
         self._auth.save_access_token(data["access_token"])
         return data
 
+    # ─── Profile endpoints ─────────────────────────────────────────────────────
+
+    async def get_profile(self) -> dict:
+        """GET /profile"""
+        return await self._get("/profile")
+
+    async def update_profile(
+        self,
+        display_name: str = "",
+        bio: str = "",
+        password: str = "",
+    ) -> dict:
+        """POST /profile/update"""
+
+        body = {
+            "display_name": display_name,
+            "bio": bio,
+        }
+
+        if password:
+            body["password"] = password
+
+        return await self._post("/profile/update", body)
+
+    async def delete_profile(self, password: str) -> dict:
+        """POST /profile/delete"""
+        try:
+            return await self._post(
+                "/profile/delete",
+                {"password": password},
+            )
+        finally:
+            self._auth.logout()
+
     # ─── Song / Publish endpoints ─────────────────────────────────────────────
 
     async def publish_song(self, metadata: dict) -> dict:
