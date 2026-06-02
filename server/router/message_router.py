@@ -19,6 +19,7 @@ from server.services import (
     logging_service,
     negotiation_service,
     peer_service,
+    profile_service,
     publish_service,
     session_service,
     time_service,
@@ -151,6 +152,26 @@ async def dispatch(
         return await logging_service.get_history(
             user_id=user_id,
             history_type=payload.get("history_type", "download"),
+        )
+
+    # ------------------------------------------------------------------
+    # Profile
+    # ------------------------------------------------------------------
+    if msg_type == "PROFILE_GET_REQ":
+        return await profile_service.get_profile(user_id=user_id)
+
+    if msg_type == "PROFILE_UPDATE_REQ":
+        return await profile_service.update_profile(
+            user_id=user_id,
+            display_name=payload.get("display_name", ""),
+            bio=payload.get("bio", ""),
+            password=payload.get("password", ""),
+        )
+
+    if msg_type == "PROFILE_DELETE_REQ":
+        return await profile_service.delete_account(
+            user_id=user_id,
+            password=payload.get("password", ""),
         )
 
     # ------------------------------------------------------------------

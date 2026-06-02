@@ -34,6 +34,7 @@ async def publish(user_id: str, metadata: dict) -> dict:
     Publish song metadata to the catalogue.
 
     Expected metadata keys: filename, mime_type, size, hmac_hash, stp_port.
+    Optional metadata keys: title, artist, album.
     Returns ok with the generated music_id.
     """
     filename  = metadata.get("filename", "")
@@ -41,6 +42,9 @@ async def publish(user_id: str, metadata: dict) -> dict:
     size      = metadata.get("size", 0)
     hmac_hash = metadata.get("hmac_hash", "")
     stp_port  = metadata.get("stp_port", 0)
+    title     = metadata.get("title", "")
+    artist    = metadata.get("artist", "")
+    album     = metadata.get("album", "")
 
     if not filename or not hmac_hash:
         return err("filename and hmac_hash are required.")
@@ -54,10 +58,12 @@ async def publish(user_id: str, metadata: dict) -> dict:
     await db.execute(
         """
         INSERT INTO music_metadata
-            (music_id, owner_id, filename, mime_type, size, hmac_hash, published_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (music_id, owner_id, filename, mime_type, size, hmac_hash, published_at,
+             title, artist, album)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (music_id, user_id, filename, mime_type, size, hmac_hash, now),
+        (music_id, user_id, filename, mime_type, size, hmac_hash, now,
+         title, artist, album),
     )
     await db.execute(
         "INSERT INTO publish_history (user_id, music_id, timestamp) VALUES (?,?,?)",
@@ -71,7 +77,7 @@ async def publish(user_id: str, metadata: dict) -> dict:
 
 async def search(query: str) -> dict:
     """
-    Full-text search on filename (case-insensitive LIKE).
+    Full-text search on filename, title, and artist (case-insensitive LIKE).
     Returns a list of song metadata dicts.
     """
     db = await get_db()
@@ -79,14 +85,17 @@ async def search(query: str) -> dict:
     async with db.execute(
         """
         SELECT mm.music_id, mm.filename, mm.mime_type, mm.size,
-               mm.hmac_hash, mm.published_at, u.username AS owner
+               mm.hmac_hash, mm.published_at, mm.title, mm.artist, mm.album,
+               u.username AS owner
         FROM music_metadata mm
         JOIN users u ON u.user_id = mm.owner_id
         WHERE mm.filename LIKE ?
+           OR mm.title    LIKE ?
+           OR mm.artist   LIKE ?
         ORDER BY mm.published_at DESC
         LIMIT 50
         """,
-        (pattern,),
+        (pattern, pattern, pattern),
     ) as cur:
         rows = await cur.fetchall()
 
@@ -99,7 +108,8 @@ async def get_song(music_id: str) -> dict:
     async with db.execute(
         """
         SELECT mm.music_id, mm.filename, mm.mime_type, mm.size,
-               mm.hmac_hash, mm.published_at, u.username AS owner, mm.owner_id
+               mm.hmac_hash, mm.published_at, mm.title, mm.artist, mm.album,
+               u.username AS owner, mm.owner_id
         FROM music_metadata mm
         JOIN users u ON u.user_id = mm.owner_id
         WHERE mm.music_id = ?

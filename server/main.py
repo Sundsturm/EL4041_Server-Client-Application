@@ -16,7 +16,7 @@ import signal
 import sys
 
 from server import config
-from server.database import close_db, init_db
+from server.database import close_db, init_db, _migrate_schema
 from server.network.quic_server import run_quic_server
 from server.network.rest_server import build_uvicorn_server
 from server.services.session_service import cleanup_loop
@@ -32,6 +32,7 @@ async def main() -> None:
 
     # 1. Initialise database (idempotent)
     await init_db()
+    await _migrate_schema()
     print("[DB] Schema initialised.")
 
     # 2. Build REST server (does not start yet)

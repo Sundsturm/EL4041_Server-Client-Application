@@ -69,6 +69,9 @@ class PublishRequest(BaseModel):
     size: int = Field(..., gt=0)
     hmac_hash: str            # HMAC-SHA256 of the file, computed client-side
     stp_port: int = Field(..., gt=0, lt=65536)   # port where sender listens for STP
+    title:  str = ""
+    artist: str = ""
+    album:  str = ""
 
 
 class SearchQuery(BaseModel):
@@ -93,6 +96,20 @@ class VerifyTokenRequest(BaseModel):
 
 class PeerStatusRequest(BaseModel):
     peer_id: str
+
+
+# ===========================================================================
+# Profile
+# ===========================================================================
+
+class UpdateProfileRequest(BaseModel):
+    display_name: str = ""
+    bio:          str = ""
+    password:     str = ""   # optional; empty means no change
+
+
+class DeleteProfileRequest(BaseModel):
+    password: str
 
 
 # ===========================================================================

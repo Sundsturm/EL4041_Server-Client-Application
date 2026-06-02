@@ -90,7 +90,10 @@ async def init_db() -> None:
             mime_type    TEXT NOT NULL,
             size         INTEGER NOT NULL,
             hmac_hash    TEXT NOT NULL,    -- HMAC-SHA256 of file bytes
-            published_at TEXT NOT NULL
+            published_at TEXT NOT NULL,
+            title        TEXT NOT NULL DEFAULT '',
+            artist       TEXT NOT NULL DEFAULT '',
+            album        TEXT NOT NULL DEFAULT ''
         );
 
         -- ----------------------------------------------------------------
@@ -151,4 +154,32 @@ async def init_db() -> None:
         );
         """
     )
+    await db.commit()
+
+
+async def _migrate_schema() -> None:
+    """
+    Apply additive schema migrations for existing databases.
+    Uses PRAGMA table_info to check column presence before ALTER TABLE,
+    so this is safe to call on every startup (idempotent).
+    """
+    db = await get_db()
+
+    # Columns to add to music_metadata if they don't exist yet
+    new_columns = [
+        ("title",  "TEXT NOT NULL DEFAULT ''"),
+        ("artist", "TEXT NOT NULL DEFAULT ''"),
+        ("album",  "TEXT NOT NULL DEFAULT ''"),
+    ]
+
+    async with db.execute("PRAGMA table_info(music_metadata)") as cur:
+        existing = {row["name"] async for row in cur}
+
+    for col_name, col_def in new_columns:
+        if col_name not in existing:
+            await db.execute(
+                f"ALTER TABLE music_metadata ADD COLUMN {col_name} {col_def}"
+            )
+            print(f"[DB] Migration: added column '{col_name}' to music_metadata.")
+
     await db.commit()

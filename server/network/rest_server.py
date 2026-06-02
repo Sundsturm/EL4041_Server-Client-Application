@@ -23,6 +23,7 @@ from server import config
 from server.database import get_db
 from server.models.schemas import (
     DownloadRequest,
+    DeleteProfileRequest,
     HistoryRequest,
     LoginRequest,
     LogoutRequest,
@@ -32,6 +33,7 @@ from server.models.schemas import (
     RefreshRequest,
     RegisterRequest,
     SearchQuery,
+    UpdateProfileRequest,
     VerifyTokenRequest,
     err,
 )
@@ -174,6 +176,31 @@ async def publish(
 @app.get("/songs")
 async def search_songs(q: str = "", user_id: str = Depends(get_current_user)):
     return await dispatch("SUBSCRIBE_REQ", {"q": q}, user_id=user_id)
+
+
+# ---------------------------------------------------------------------------
+# Profile
+# ---------------------------------------------------------------------------
+
+@app.get("/profile")
+async def get_profile(user_id: str = Depends(get_current_user)):
+    return await dispatch("PROFILE_GET_REQ", {}, user_id=user_id)
+
+
+@app.post("/profile/update")
+async def update_profile(
+    body: UpdateProfileRequest,
+    user_id: str = Depends(get_current_user),
+):
+    return await dispatch("PROFILE_UPDATE_REQ", body.model_dump(), user_id=user_id)
+
+
+@app.post("/profile/delete")
+async def delete_profile(
+    body: DeleteProfileRequest,
+    user_id: str = Depends(get_current_user),
+):
+    return await dispatch("PROFILE_DELETE_REQ", body.model_dump(), user_id=user_id)
 
 
 # ---------------------------------------------------------------------------
