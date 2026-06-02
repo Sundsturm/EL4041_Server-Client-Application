@@ -76,8 +76,9 @@ class CommandController:
             "    delete-profile    — delete account (with confirmation)\n"
             "\n"
             "  Music  [login required]\n"
+            "    songs  [limit]    — list ALL songs in catalogue (default: 100)\n"
+            "    search  <query>   — search songs by title/artist/filename\n"
             "    publish <path>    — publish an audio file\n"
-            "    search  <query>   — search songs\n"
             "    download <id>     — initiate file download\n"
             "    history [type]    — download|publish|login|logs\n"
             "    serve-stp [port]  — receive a file over STP\n"
@@ -140,6 +141,8 @@ class CommandController:
                 await self._delete_profile()
 
             # --- Music (login required) ---
+            elif cmd == "songs":
+                await self._songs(args)
             elif cmd == "publish":
                 await self._publish(args)
             elif cmd == "search":
@@ -335,6 +338,74 @@ class CommandController:
         print(_hr())
 
     # ─── Music commands ───────────────────────────────────────────────────────
+
+    async def _songs(self, args: list[str]) -> None:
+        """List all songs in the catalogue with full metadata."""
+        if not self.auth.is_logged_in():
+            print("  You must be logged in to list songs.")
+            return
+
+        # Optional limit argument: songs 50
+        limit = 100
+        if len(args) >= 2:
+            try:
+                limit = int(args[1])
+            except ValueError:
+                print("  Usage: songs [limit]   (limit must be a number)")
+                return
+
+        print(f"  Fetching song catalogue (up to {limit} songs)…")
+        data = await self.api.list_songs(limit=limit)
+        songs = data.get("songs", data if isinstance(data, list) else [])
+        total = data.get("total", len(songs))
+
+        print(_hr())
+        print(f"  SONG CATALOGUE  ({total} song{'s' if total != 1 else ''})")
+        print(_hr())
+
+        if not songs:
+            print("  No songs published yet.")
+            print(_hr())
+            return
+
+        for i, song in enumerate(songs, 1):
+            title     = song.get("title")     or song.get("filename") or "Unknown"
+            artist    = song.get("artist")    or "Unknown artist"
+            album     = song.get("album")     or ""
+            filename  = song.get("filename")  or ""
+            mime      = song.get("mime_type") or ""
+            size_b    = song.get("size", 0)
+            music_id  = song.get("music_id")  or "?"
+            owner     = song.get("owner")     or "?"
+            owner_id  = song.get("owner_id")  or "?"
+            pub_at    = song.get("published_at") or ""
+
+            # Human-readable file size
+            if size_b >= 1_048_576:
+                size_str = f"{size_b / 1_048_576:.1f} MB"
+            elif size_b >= 1024:
+                size_str = f"{size_b / 1024:.1f} KB"
+            else:
+                size_str = f"{size_b} B"
+
+            # Short ISO timestamp: take only date+time part (strip microseconds)
+            pub_short = pub_at[:19].replace("T", " ") if pub_at else "N/A"
+
+            # Extension from mime or filename
+            ext = filename.rsplit(".", 1)[-1].upper() if "." in filename else mime.split("/")[-1].upper()
+
+            print(f"  [{i:>3}] {title}")
+            print(f"         Artist   : {artist}" + (f"  /  {album}" if album else ""))
+            print(f"         Uploader : @{owner}  (ID: {owner_id})")
+            print(f"         Music ID : {music_id}")
+            print(f"         File     : {filename}  [{ext}  {size_str}]")
+            print(f"         Published: {pub_short}")
+            if i < len(songs):
+                print()
+
+        print(_hr())
+        print(f"  Tip: use 'download <music_id>' to download a song.")
+        print(_hr())
 
     async def _publish(self, args: list[str]) -> None:
         if not self.auth.is_logged_in():

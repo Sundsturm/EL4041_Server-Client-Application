@@ -199,6 +199,18 @@ async def search_songs(q: str = "", user_id: str = Depends(get_current_user)):
     return await dispatch("SUBSCRIBE_REQ", {"q": q}, user_id=user_id)
 
 
+@app.get("/songs/list")
+async def list_all_songs(
+    limit: int = 100,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Return all songs in the catalogue (no text filter).
+    Includes uploader username (owner) and user_id (owner_id).
+    """
+    return await dispatch("LIST_SONGS_REQ", {"limit": limit}, user_id=user_id)
+
+
 # ---------------------------------------------------------------------------
 # Profile
 # ---------------------------------------------------------------------------

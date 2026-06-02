@@ -161,6 +161,10 @@ class CSPClient:
         # Server router currently uses only q.
         return await self.send_request("SUBSCRIBE_REQ", {"q": query, "limit": limit}, auth=True)
 
+    async def list_songs(self, limit: int = 100) -> dict:
+        """LIST_SONGS_REQ — return all songs with full metadata (no filter)."""
+        return await self.send_request("LIST_SONGS_REQ", {"limit": limit}, auth=True)
+
     async def download(self, music_id: str) -> dict:
         return await self.send_request("DOWNLOAD_REQ", {"music_id": music_id}, auth=True)
 
