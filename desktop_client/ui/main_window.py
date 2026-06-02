@@ -303,6 +303,7 @@ class MainWindow(QMainWindow):
 
                     dlg = EditProfileDialog(
                         username=profile.get("username", username),
+                        display_name=profile.get("display_name", ""),
                         bio=profile.get("bio", ""),
                         parent=self,
                     )
@@ -314,6 +315,7 @@ class MainWindow(QMainWindow):
                     payload = dlg.data()
                     update_future = self._tm.submit_api(
                         self._api.update_profile(
+                            display_name=payload["display_name"],
                             bio=payload["bio"],
                             password=payload["password"],
                         )
@@ -463,6 +465,9 @@ class MainWindow(QMainWindow):
                 try:
                     result  = future.result()
                     music_id = result.get("music_id", "")
+                    if music_id and local_path:
+                        self._tm.register_shared_file(music_id, local_path)
+
                     self._publish_win.set_status(
                         f"✓ published — id: {music_id}"
                     )

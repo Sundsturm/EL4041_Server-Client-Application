@@ -113,12 +113,13 @@ class APIClient:
             "username": username,
             "password": password,
         }, auth=False)
+        print("LOGIN RESPONSE:", data)
         # Persist tokens (data is already unwrapped inner dict)
         self._auth.save_access_token(data["access_token"])
         self._auth.save_session_token(data["session_token"])
         self._auth.save_profile({
             "user_id":  data.get("user_id"),
-            "username": username,
+            "username": username,   # server does not echo username, use the one we sent
         })
         return data
 
@@ -149,12 +150,14 @@ class APIClient:
 
     async def update_profile(
         self,
+        display_name: str = "",
         bio: str = "",
         password: str = "",
     ) -> dict:
         """POST /profile/update"""
 
         body = {
+            "display_name": display_name,
             "bio": bio,
         }
 
@@ -191,6 +194,18 @@ class APIClient:
         Returns: { peer_id, peer_ip, peer_port, peer_token }
         """
         return await self._post("/download", {"music_id": music_id})
+
+    async def verify_peer_token(self, peer_token: str) -> dict:
+        """
+        POST /peer/verify-token
+        Called by the provider peer before sending file bytes over STP.
+        The peer_token itself is the credential, so auth=False.
+        """
+        return await self._post(
+            "/peer/verify-token",
+            {"peer_token": peer_token},
+            auth=False,
+        )
 
     # ─── History ─────────────────────────────────────────────────────────────
 

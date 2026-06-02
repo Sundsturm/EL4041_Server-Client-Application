@@ -8,43 +8,43 @@ running in a background QThread.
 
 import asyncio
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Callable, Optional
+from typing import Optional
 
 from PySide6.QtCore import QObject, Signal
 
 from core.api_client import APIClient
-from core.stp_receiver import STPReceiver
-from core.stp_sender import STPSender
+from core.stp_downloader import STPDownloader
+from core.stp_provider import STPProvider
 from config import STP_LISTEN_PORT
 
 
 class TransferDirection(Enum):
-    UPLOAD   = auto()
+    UPLOAD = auto()
     DOWNLOAD = auto()
 
 
 class TransferStatus(Enum):
-    PENDING    = auto()
-    ACTIVE     = auto()
-    PAUSED     = auto()
-    DONE       = auto()
-    FAILED     = auto()
-    CANCELLED  = auto()
+    PENDING = auto()
+    ACTIVE = auto()
+    PAUSED = auto()
+    DONE = auto()
+    FAILED = auto()
+    CANCELLED = auto()
 
 
 @dataclass
 class TransferItem:
     transfer_id: str
-    music_id:    str
-    filename:    str
-    direction:   TransferDirection
+    music_id: str
+    filename: str
+    direction: TransferDirection
     total_chunks: int = 0
-    done_chunks:  int = 0
-    status:       TransferStatus = TransferStatus.PENDING
-    error:        str = ""
-    local_path:   str = ""
+    done_chunks: int = 0
+    status: TransferStatus = TransferStatus.PENDING
+    error: str = ""
+    local_path: str = ""
 
 
 class TransferManager(QObject):
@@ -59,19 +59,21 @@ class TransferManager(QObject):
     """
 
     progress_updated = Signal(str, int, int)   # id, done, total
-    transfer_done    = Signal(str, str)         # id, local_path
-    transfer_failed  = Signal(str, str)         # id, reason
+    transfer_done = Signal(str, str)           # id, local_path
+    transfer_failed = Signal(str, str)         # id, reason
 
     def __init__(self, api: APIClient, parent=None):
         super().__init__(parent)
-        self._api    = api
+        self._api = api
         self._items: dict[str, TransferItem] = {}
-        self._senders: dict[str, STPSender]  = {}
+        self._downloaders: dict[str, STPDownloader] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
 
-        self._valid_tokens: set[str] = set()
-        self._receiver: Optional[STPReceiver] = None
+        # music_id -> local file path for songs published by this client.
+        # STPProvider uses this to serve download requests from other peers.
+        self._shared_files: dict[str, str] = {}
+        self._provider: Optional[STPProvider] = None
 
     # ─── Asyncio thread ──────────────────────────────────────────────────────
 
@@ -88,22 +90,40 @@ class TransferManager(QObject):
 
     async def _async_start(self):
         await self._api.start()
-        self._receiver = STPReceiver(
-            valid_tokens=self._valid_tokens,
-            progress_cb=self._on_recv_progress,
-            done_cb=self._on_recv_done,
-            error_cb=self._on_recv_error,
+        self._provider = STPProvider(
+            api=self._api,
+            shared_files=self._shared_files,
             listen_port=STP_LISTEN_PORT,
+            progress_cb=self._on_provider_progress,
+            error_cb=self._on_provider_error,
         )
-        await self._receiver.start()
+        await self._provider.start()
 
     def stop(self):
         if self._loop:
+            if self._provider:
+                asyncio.run_coroutine_threadsafe(self._provider.stop(), self._loop)
             self._loop.call_soon_threadsafe(self._loop.stop)
 
     def _submit(self, coro):
         """Submit a coroutine to the background loop."""
         return asyncio.run_coroutine_threadsafe(coro, self._loop)
+
+    # ─── Shared files / provider registry ────────────────────────────────────
+
+    def register_shared_file(self, music_id: str, local_path: str):
+        """
+        Remember that this client owns a published song.
+
+        Called after /publish returns music_id. Without this mapping, the peer
+        can be online but cannot send the actual file to a downloader.
+        """
+        if not music_id or not local_path:
+            return
+        self._shared_files[music_id] = local_path
+        if self._provider:
+            self._provider.register_file(music_id, local_path)
+        print(f"[SHARED FILE] {music_id} -> {local_path}")
 
     # ─── Download ────────────────────────────────────────────────────────────
 
@@ -121,115 +141,75 @@ class TransferManager(QObject):
     async def _do_download(self, item: TransferItem):
         item.status = TransferStatus.ACTIVE
         try:
-            # Negotiate with server
+            # 1. Negotiate with server: get provider peer address + peer_token.
             neg = await self._api.request_download(item.music_id)
-            peer_ip    = neg["peer_ip"]
-            peer_port  = neg["peer_port"]
-            peer_token = neg["peer_token"]
             print("[DOWNLOAD NEG]", neg)
 
-            # Register token with receiver
-            self._valid_tokens.add(peer_token)
+            peer_ip = neg["peer_ip"]
+            peer_port = int(neg["peer_port"])
+            peer_token = neg["peer_token"]
 
-            # The sender (peer) will connect to us.
-            # Nothing more to do here; STPReceiver handles the rest via callbacks.
-            # But we need to tell the peer that we are ready (done via server signaling in real impl).
-            # For direct P2P where WE connect TO the peer:
-            # (depends on server NAT traversal; here we act as downloader that connects out)
-            sender_as_downloader = STPSender(
+            # 2. Connect directly to provider peer and receive file.
+            downloader = STPDownloader(
                 peer_ip=peer_ip,
                 peer_port=peer_port,
                 peer_token=peer_token,
-                file_path="",          # Not sending, but STPSender is repurposed for DOWNLOAD_REQ flow
                 music_id=item.music_id,
+                filename=item.filename,
+                progress_cb=self._on_download_progress,
+                done_cb=self._on_download_done,
+                error_cb=self._on_download_error,
             )
-            # Actually: in the project the downloader receives, sender sends.
-            # So we just wait for the STPReceiver callback. Nothing else needed.
-            _ = sender_as_downloader  # Remove if NAT allows passive receive
+            self._downloaders[item.transfer_id] = downloader
 
-        except Exception as exc:
-            item.status = TransferStatus.FAILED
-            item.error  = str(exc)
-            self.transfer_failed.emit(item.transfer_id, str(exc))
-
-    # ─── Upload (Publish + send when peer requests) ───────────────────────────
-
-    def start_upload(
-        self,
-        peer_ip: str,
-        peer_port: int,
-        peer_token: str,
-        file_path: str,
-        music_id: str,
-    ):
-        tid  = f"ul_{music_id}"
-        item = TransferItem(
-            transfer_id=tid,
-            music_id=music_id,
-            filename=file_path,
-            direction=TransferDirection.UPLOAD,
-            local_path=file_path,
-        )
-        self._items[tid] = item
-
-        sender = STPSender(
-            peer_ip=peer_ip,
-            peer_port=peer_port,
-            peer_token=peer_token,
-            file_path=file_path,
-            music_id=music_id,
-            progress_cb=lambda done, total: self._on_send_progress(tid, done, total),
-        )
-        self._senders[tid] = sender
-        self._submit(self._do_upload(item, sender))
-
-    async def _do_upload(self, item: TransferItem, sender: STPSender):
-        item.status = TransferStatus.ACTIVE
-        try:
-            await sender.send()
+            path = await downloader.download()
             item.status = TransferStatus.DONE
-            self.transfer_done.emit(item.transfer_id, item.local_path)
+            item.local_path = path
+
         except Exception as exc:
             item.status = TransferStatus.FAILED
-            item.error  = str(exc)
+            item.error = str(exc)
             self.transfer_failed.emit(item.transfer_id, str(exc))
+        finally:
+            self._downloaders.pop(item.transfer_id, None)
 
     def cancel_transfer(self, transfer_id: str):
-        if transfer_id in self._senders:
-            self._senders[transfer_id].cancel()
+        if transfer_id in self._downloaders:
+            self._downloaders[transfer_id].cancel()
         if transfer_id in self._items:
             self._items[transfer_id].status = TransferStatus.CANCELLED
 
-    # ─── STPReceiver callbacks (called from asyncio thread) ──────────────────
+    # ─── Download callbacks (called from asyncio thread) ─────────────────────
 
-    def _on_recv_progress(self, done: int, total: int, music_id: str):
+    def _on_download_progress(self, done: int, total: int, music_id: str):
         tid = f"dl_{music_id}"
         if tid in self._items:
-            self._items[tid].done_chunks  = done
+            self._items[tid].done_chunks = done
             self._items[tid].total_chunks = total
         self.progress_updated.emit(tid, done, total)
 
-    def _on_recv_done(self, music_id: str, path: str):
+    def _on_download_done(self, music_id: str, path: str):
         tid = f"dl_{music_id}"
         if tid in self._items:
-            self._items[tid].status     = TransferStatus.DONE
+            self._items[tid].status = TransferStatus.DONE
             self._items[tid].local_path = path
         self.transfer_done.emit(tid, path)
 
-    def _on_recv_error(self, music_id: str, reason: str):
+    def _on_download_error(self, music_id: str, reason: str):
         tid = f"dl_{music_id}"
         if tid in self._items:
             self._items[tid].status = TransferStatus.FAILED
-            self._items[tid].error  = reason
+            self._items[tid].error = reason
         self.transfer_failed.emit(tid, reason)
 
-    # ─── Send progress (called from asyncio thread) ──────────────────────────
+    # ─── Provider callbacks ──────────────────────────────────────────────────
 
-    def _on_send_progress(self, tid: str, done: int, total: int):
-        if tid in self._items:
-            self._items[tid].done_chunks  = done
-            self._items[tid].total_chunks = total
-        self.progress_updated.emit(tid, done, total)
+    def _on_provider_progress(self, music_id: str, done: int, total: int):
+        # Optional: upload progress can be displayed later if UI supports it.
+        print(f"[STP PROVIDER] sent {music_id}: {done}/{total}")
+
+    def _on_provider_error(self, music_id: str, reason: str):
+        print(f"[STP PROVIDER ERROR] {music_id}: {reason}")
 
     # ─── Getters ─────────────────────────────────────────────────────────────
 
