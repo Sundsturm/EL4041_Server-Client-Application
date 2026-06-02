@@ -22,6 +22,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from server import config
 from server.database import get_db
 from server.models.schemas import (
+    ApproveTransferRequest,
     DownloadRequest,
     DeleteProfileRequest,
     HistoryRequest,
@@ -32,6 +33,7 @@ from server.models.schemas import (
     PublishRequest,
     RefreshRequest,
     RegisterRequest,
+    RejectTransferRequest,
     SearchQuery,
     UpdateProfileRequest,
     VerifyTokenRequest,
@@ -241,8 +243,74 @@ async def delete_profile(
 # ---------------------------------------------------------------------------
 
 @app.post("/download")
-async def download(body: DownloadRequest, user_id: str = Depends(get_current_user)):
-    return await dispatch("DOWNLOAD_REQ", body.model_dump(), user_id=user_id)
+async def download(
+    body: DownloadRequest,
+    request: Request,
+    user_id: str = Depends(get_current_user),
+):
+    payload = body.model_dump()
+    payload["requester_ip"] = _client_reachable_ip(request) or "127.0.0.1"
+    return await dispatch("DOWNLOAD_REQ", payload, user_id=user_id)
+
+
+@app.get("/transfer/requests")
+async def get_transfer_requests(
+    timeout: int = 28,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Long-polling endpoint for owners.
+    Holds the connection until pending requests arrive or timeout expires.
+    """
+    return await dispatch(
+        "PENDING_REQUESTS_REQ",
+        {"long_poll_timeout": float(min(timeout, 55))},
+        user_id=user_id,
+    )
+
+
+@app.post("/transfer/approve")
+async def approve_transfer(
+    body: ApproveTransferRequest,
+    user_id: str = Depends(get_current_user),
+):
+    return await dispatch("APPROVE_TRANSFER_REQ", body.model_dump(), user_id=user_id)
+
+
+@app.post("/transfer/reject")
+async def reject_transfer(
+    body: RejectTransferRequest,
+    user_id: str = Depends(get_current_user),
+):
+    return await dispatch("REJECT_TRANSFER_REQ", body.model_dump(), user_id=user_id)
+
+
+@app.get("/transfer/status/{request_id}")
+async def transfer_status(
+    request_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    return await dispatch(
+        "TRANSFER_STATUS_REQ",
+        {"request_id": request_id},
+        user_id=user_id,
+    )
+
+
+@app.get("/transfer/my-downloads")
+async def my_downloads(user_id: str = Depends(get_current_user)):
+    """Return downloads with status in_progress or completed."""
+    return await dispatch("MY_DOWNLOADS_REQ", {}, user_id=user_id)
+
+
+@app.post("/transfer/update-status")
+async def update_transfer_status(
+    request: Request,
+    user_id: str = Depends(get_current_user),
+):
+    """Called by owner client after STP send to update transfer status."""
+    body = await request.json()
+    return await dispatch("UPDATE_TRANSFER_STATUS_REQ", body, user_id=user_id)
 
 
 @app.post("/peer/verify-token")

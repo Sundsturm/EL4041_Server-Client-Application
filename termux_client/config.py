@@ -32,6 +32,7 @@ ACCESS_TOKEN_FILE = TOKENS_DIR / "access.jwt"
 SESSION_TOKEN_FILE = TOKENS_DIR / "session.token"
 PROFILE_FILE = PROFILE_DIR / "profile.json"
 HISTORY_FILE = HISTORY_DIR / "history.json"
+CATALOG_FILE = MUSIC_DIR / "catalog.json"      # music_id → local file path
 
 SUPPORTED_AUDIO_EXTENSIONS = {
     ".mp3": "audio/mpeg",

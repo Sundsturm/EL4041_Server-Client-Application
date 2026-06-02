@@ -165,8 +165,40 @@ class CSPClient:
         """LIST_SONGS_REQ — return all songs with full metadata (no filter)."""
         return await self.send_request("LIST_SONGS_REQ", {"limit": limit}, auth=True)
 
-    async def download(self, music_id: str) -> dict:
-        return await self.send_request("DOWNLOAD_REQ", {"music_id": music_id}, auth=True)
+    async def download(self, music_id: str, requester_port: int = 5050) -> dict:
+        return await self.send_request("DOWNLOAD_REQ", {
+            "music_id": music_id,
+            "requester_port": requester_port,
+        }, auth=True)
+
+    async def get_pending_requests(self) -> dict:
+        """Poll server for pending download requests (owner side)."""
+        return await self.send_request("PENDING_REQUESTS_REQ", {}, auth=True)
+
+    async def approve_transfer(self, request_id: str) -> dict:
+        return await self.send_request("APPROVE_TRANSFER_REQ", {
+            "request_id": request_id,
+        }, auth=True)
+
+    async def reject_transfer(self, request_id: str, reason: str = "") -> dict:
+        return await self.send_request("REJECT_TRANSFER_REQ", {
+            "request_id": request_id,
+            "reason": reason,
+        }, auth=True)
+
+    async def get_transfer_status(self, request_id: str) -> dict:
+        return await self.send_request("TRANSFER_STATUS_REQ", {
+            "request_id": request_id,
+        }, auth=True)
+
+    async def get_my_downloads(self) -> dict:
+        return await self.send_request("MY_DOWNLOADS_REQ", {}, auth=True)
+
+    async def update_transfer_status(self, request_id: str, status: str) -> dict:
+        return await self.send_request("UPDATE_TRANSFER_STATUS_REQ", {
+            "request_id": request_id,
+            "status": status,
+        }, auth=True)
 
     async def history(self, history_type: str = "download") -> dict:
         return await self.send_request("HISTORY_REQ", {"history_type": history_type}, auth=True)

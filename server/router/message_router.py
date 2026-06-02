@@ -139,7 +139,44 @@ async def dispatch(
         return await negotiation_service.request_download(
             requester_id=user_id,
             music_id=payload.get("music_id", ""),
+            requester_ip=payload.get("requester_ip", tailscale_ip or ""),
+            requester_port=int(payload.get("requester_port", 5050)),
         )
+
+    if msg_type == "PENDING_REQUESTS_REQ":
+        return await negotiation_service.get_pending_requests(
+            provider_id=user_id,
+            long_poll_timeout=float(payload.get("long_poll_timeout", 28.0)),
+        )
+
+    if msg_type == "APPROVE_TRANSFER_REQ":
+        return await negotiation_service.approve_request(
+            provider_id=user_id,
+            request_id=payload.get("request_id", ""),
+        )
+
+    if msg_type == "REJECT_TRANSFER_REQ":
+        return await negotiation_service.reject_request(
+            provider_id=user_id,
+            request_id=payload.get("request_id", ""),
+            reason=payload.get("reason", ""),
+        )
+
+    if msg_type == "TRANSFER_STATUS_REQ":
+        return await negotiation_service.get_transfer_status(
+            requester_id=user_id,
+            request_id=payload.get("request_id", ""),
+        )
+
+    if msg_type == "MY_DOWNLOADS_REQ":
+        return await negotiation_service.list_my_downloads(requester_id=user_id)
+
+    if msg_type == "UPDATE_TRANSFER_STATUS_REQ":
+        return await negotiation_service.update_transfer_status(
+            request_id=payload.get("request_id", ""),
+            status=payload.get("status", ""),
+        )
+
 
     # ------------------------------------------------------------------
     # Logging / History

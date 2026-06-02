@@ -143,6 +143,25 @@ async def init_db() -> None:
         );
 
         -- ----------------------------------------------------------------
+        -- download_requests: approval-based P2P transfer requests
+        -- status lifecycle: pending -> approved/rejected -> in_progress
+        --                   -> completed/failed
+        -- ----------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS download_requests (
+            request_id      TEXT PRIMARY KEY,
+            music_id        TEXT NOT NULL REFERENCES music_metadata(music_id),
+            requester_id    TEXT NOT NULL REFERENCES users(user_id),
+            provider_id     TEXT NOT NULL REFERENCES users(user_id),
+            requester_ip    TEXT NOT NULL,
+            requester_port  INTEGER NOT NULL DEFAULT 5050,
+            peer_token      TEXT,
+            status          TEXT NOT NULL DEFAULT 'pending',
+            reject_reason   TEXT,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        );
+
+        -- ----------------------------------------------------------------
         -- logs: structured server event log
         -- ----------------------------------------------------------------
         CREATE TABLE IF NOT EXISTS logs (
@@ -181,5 +200,24 @@ async def _migrate_schema() -> None:
                 f"ALTER TABLE music_metadata ADD COLUMN {col_name} {col_def}"
             )
             print(f"[DB] Migration: added column '{col_name}' to music_metadata.")
+
+    # Ensure download_requests table exists (for DBs created before this feature)
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS download_requests (
+            request_id      TEXT PRIMARY KEY,
+            music_id        TEXT NOT NULL,
+            requester_id    TEXT NOT NULL,
+            provider_id     TEXT NOT NULL,
+            requester_ip    TEXT NOT NULL,
+            requester_port  INTEGER NOT NULL DEFAULT 5050,
+            peer_token      TEXT,
+            status          TEXT NOT NULL DEFAULT 'pending',
+            reject_reason   TEXT,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        )
+        """
+    )
 
     await db.commit()

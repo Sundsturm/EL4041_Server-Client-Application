@@ -84,10 +84,20 @@ class SearchQuery(BaseModel):
 
 class DownloadRequest(BaseModel):
     music_id: str
+    requester_port: int = 5050   # STP port where downloader will listen
 
 
 class VerifyTokenRequest(BaseModel):
     peer_token: str
+
+
+class ApproveTransferRequest(BaseModel):
+    request_id: str
+
+
+class RejectTransferRequest(BaseModel):
+    request_id: str
+    reason: str = ""
 
 
 # ===========================================================================

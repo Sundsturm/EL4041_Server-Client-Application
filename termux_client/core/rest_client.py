@@ -126,8 +126,60 @@ class RESTClient:
         resp = await self.client.get("/songs/list", params={"limit": limit}, headers=self._headers())
         return self._unwrap(resp)
 
-    async def download(self, music_id: str) -> dict:
-        resp = await self.client.post("/download", json={"music_id": music_id}, headers=self._headers())
+    async def download(self, music_id: str, requester_port: int = 5050) -> dict:
+        resp = await self.client.post(
+            "/download",
+            json={"music_id": music_id, "requester_port": requester_port},
+            headers=self._headers(),
+        )
+        return self._unwrap(resp)
+
+    async def get_pending_requests(self, timeout: int = 28) -> dict:
+        """Long-poll for pending download requests (owner side)."""
+        resp = await self.client.get(
+            "/transfer/requests",
+            params={"timeout": timeout},
+            headers=self._headers(),
+            timeout=timeout + 5,
+        )
+        return self._unwrap(resp)
+
+    async def approve_transfer(self, request_id: str) -> dict:
+        resp = await self.client.post(
+            "/transfer/approve",
+            json={"request_id": request_id},
+            headers=self._headers(),
+        )
+        return self._unwrap(resp)
+
+    async def reject_transfer(self, request_id: str, reason: str = "") -> dict:
+        resp = await self.client.post(
+            "/transfer/reject",
+            json={"request_id": request_id, "reason": reason},
+            headers=self._headers(),
+        )
+        return self._unwrap(resp)
+
+    async def get_transfer_status(self, request_id: str) -> dict:
+        resp = await self.client.get(
+            f"/transfer/status/{request_id}",
+            headers=self._headers(),
+        )
+        return self._unwrap(resp)
+
+    async def get_my_downloads(self) -> dict:
+        resp = await self.client.get(
+            "/transfer/my-downloads",
+            headers=self._headers(),
+        )
+        return self._unwrap(resp)
+
+    async def update_transfer_status(self, request_id: str, status: str) -> dict:
+        resp = await self.client.post(
+            "/transfer/update-status",
+            json={"request_id": request_id, "status": status},
+            headers=self._headers(),
+        )
         return self._unwrap(resp)
 
     async def history(self, history_type: str = "download") -> dict:
