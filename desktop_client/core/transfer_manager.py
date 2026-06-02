@@ -126,6 +126,7 @@ class TransferManager(QObject):
             peer_ip    = neg["peer_ip"]
             peer_port  = neg["peer_port"]
             peer_token = neg["peer_token"]
+            print("[DOWNLOAD NEG]", neg)
 
             # Register token with receiver
             self._valid_tokens.add(peer_token)
