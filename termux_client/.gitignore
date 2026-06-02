@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+venv/
+.venv/
+
+# Local tokens/session files
+tokens/*
+!tokens/.gitkeep
+
+# Local profile data
+profile/*
+!profile/.gitkeep
+
+# Local history data
+history/*
+!history/.gitkeep
+
+# Downloaded / shared music files
+music/*
+!music/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
