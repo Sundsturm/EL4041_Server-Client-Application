@@ -129,6 +129,9 @@ async def dispatch(
     if msg_type == "SUBSCRIBE_REQ":
         return await publish_service.search(query=payload.get("q", ""))
 
+    if msg_type == "LIST_SONGS_REQ":
+        return await publish_service.list_songs(limit=int(payload.get("limit", 100)))
+
     # ------------------------------------------------------------------
     # Transfer negotiation
     # ------------------------------------------------------------------

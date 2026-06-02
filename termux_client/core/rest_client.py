@@ -121,6 +121,11 @@ class RESTClient:
         resp = await self.client.get("/songs", params={"q": query, "limit": limit}, headers=self._headers())
         return self._unwrap(resp)
 
+    async def list_songs(self, limit: int = 100) -> dict:
+        """GET /songs/list — return all songs with full metadata (no filter)."""
+        resp = await self.client.get("/songs/list", params={"limit": limit}, headers=self._headers())
+        return self._unwrap(resp)
+
     async def download(self, music_id: str) -> dict:
         resp = await self.client.post("/download", json={"music_id": music_id}, headers=self._headers())
         return self._unwrap(resp)

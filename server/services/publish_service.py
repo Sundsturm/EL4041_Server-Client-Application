@@ -102,6 +102,31 @@ async def search(query: str) -> dict:
     return ok({"songs": [dict(r) for r in rows]})
 
 
+async def list_songs(limit: int = 100) -> dict:
+    """
+    Return all published songs (no filter) with full metadata.
+    Includes owner username and owner_id (user_id of uploader).
+    Sorted by most-recently published first.
+    """
+    db = await get_db()
+    async with db.execute(
+        """
+        SELECT mm.music_id, mm.title, mm.artist, mm.album,
+               mm.filename, mm.mime_type, mm.size,
+               mm.hmac_hash, mm.published_at,
+               u.username AS owner, mm.owner_id
+        FROM music_metadata mm
+        JOIN users u ON u.user_id = mm.owner_id
+        ORDER BY mm.published_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ) as cur:
+        rows = await cur.fetchall()
+
+    return ok({"songs": [dict(r) for r in rows], "total": len(rows)})
+
+
 async def get_song(music_id: str) -> dict:
     """Fetch a single song's metadata."""
     db = await get_db()
