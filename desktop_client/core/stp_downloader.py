@@ -1,12 +1,13 @@
 """
 core/stp_downloader.py
-STP downloader side for P2P download.
 
-The downloader connects to the provider peer returned by /download, sends a
-TRANSFER_REQ, receives file chunks, verifies SHA256 integrity, and writes the
-song to the local music directory.
+Approval-flow STP downloader side.
 
-Frame format matches the existing desktop STP code:
+In this version the downloader LISTENS on STP_LISTEN_PORT after submitting a
+download request. When the owner approves the request, the owner connects to
+this listener and sends the file chunks.
+
+Frame format:
     [4-byte FRAME_LEN][4-byte JSON_LEN][JSON HEADER][BINARY PAYLOAD]
 """
 
@@ -17,7 +18,7 @@ import os
 import struct
 from typing import Callable, Optional
 
-from config import MUSIC_DIR, STP_VERSION
+from config import MUSIC_DIR, STP_LISTEN_PORT, STP_VERSION
 
 
 def _chunk_sha256(data: bytes) -> str:
@@ -57,29 +58,39 @@ def _safe_download_path(filename: str) -> str:
 
 
 class STPDownloader:
+    """
+    One-shot STP receiver for a single download request.
+
+    It binds to listen_port, accepts one provider connection, receives the file,
+    then closes the server.
+    """
+
     def __init__(
         self,
-        peer_ip: str,
-        peer_port: int,
-        peer_token: str,
-        music_id: str,
+        listen_port: int = STP_LISTEN_PORT,
+        music_id: str = "",
         filename: str = "",
         progress_cb: Optional[Callable[[int, int, str], None]] = None,
         done_cb: Optional[Callable[[str, str], None]] = None,
         error_cb: Optional[Callable[[str, str], None]] = None,
+        accept_timeout: float = 180.0,
     ):
-        self.peer_ip = peer_ip
-        self.peer_port = peer_port
-        self.peer_token = peer_token
+        self.listen_port = listen_port
         self.music_id = music_id
         self.filename = filename or f"{music_id}.bin"
         self.progress_cb = progress_cb
         self.done_cb = done_cb
         self.error_cb = error_cb
+        self.accept_timeout = accept_timeout
+
         self._cancelled = False
+        self._server: Optional[asyncio.Server] = None
+        self._done_future: Optional[asyncio.Future] = None
 
     def cancel(self):
         self._cancelled = True
+        if self._done_future and not self._done_future.done():
+            self._done_future.set_exception(ConnectionAbortedError("download cancelled"))
 
     async def _recv_frame(self, reader: asyncio.StreamReader) -> tuple[dict, bytes]:
         prefix = await reader.readexactly(8)
@@ -98,113 +109,168 @@ class STPDownloader:
         writer.write(_build_frame(header, payload))
         await writer.drain()
 
-    async def download(self):
+    async def _send_fail(
+        self,
+        writer: asyncio.StreamWriter,
+        reason: str,
+        music_id: str = "",
+    ):
+        await self._send_frame(writer, {
+            "version": STP_VERSION,
+            "msg_type": "TRANSFER_FAIL",
+            "music_id": music_id or self.music_id,
+            "reason": reason,
+        })
+
+    async def listen_and_receive(self) -> str:
+        """
+        Listen for exactly one provider connection and receive the file.
+
+        Returns
+        -------
+        str
+            Final downloaded file path.
+        """
+        loop = asyncio.get_running_loop()
+        self._done_future = loop.create_future()
+
+        self._server = await asyncio.start_server(
+            self._handle_connection,
+            host="0.0.0.0",
+            port=self.listen_port,
+        )
+
+        print(f"[STP DOWNLOADER] waiting on 0.0.0.0:{self.listen_port}")
+
+        try:
+            return await asyncio.wait_for(self._done_future, timeout=self.accept_timeout)
+        finally:
+            if self._server:
+                self._server.close()
+                await self._server.wait_closed()
+                self._server = None
+            print("[STP DOWNLOADER] listener closed")
+
+    async def _handle_connection(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ):
         final_path = ""
         tmp_path = ""
+        music_id = self.music_id or "unknown"
+
         try:
-            reader, writer = await asyncio.open_connection(self.peer_ip, self.peer_port)
+            req, _ = await self._recv_frame(reader)
+            if req.get("msg_type") != "TRANSFER_REQ":
+                await self._send_fail(writer, "expected TRANSFER_REQ", music_id)
+                return
 
-            try:
-                await self._send_frame(writer, {
-                    "version": STP_VERSION,
-                    "msg_type": "TRANSFER_REQ",
-                    "peer_token": self.peer_token,
-                    "music_id": self.music_id,
-                    "filename": self.filename,
-                })
+            req_music_id = req.get("music_id", "")
+            if self.music_id and req_music_id and req_music_id != self.music_id:
+                await self._send_fail(writer, "music_id mismatch", req_music_id)
+                return
 
-                accept, _ = await self._recv_frame(reader)
-                if accept.get("msg_type") == "TRANSFER_FAIL":
-                    raise ConnectionError(accept.get("reason", "transfer rejected"))
-                if accept.get("msg_type") != "TRANSFER_ACCEPT":
-                    raise ConnectionError(f"expected TRANSFER_ACCEPT, got {accept}")
+            music_id = req_music_id or self.music_id
+            filename = req.get("filename") or self.filename
+            total_chunks = int(req.get("total_chunks", 0))
+            expected_file_hash = req.get("file_hash", "")
+            chunk_size = int(req.get("chunk_size", 0))
 
-                filename = accept.get("filename") or self.filename
-                total_chunks = int(accept.get("total_chunks", 0))
-                expected_file_hash = accept.get("file_hash", "")
+            if total_chunks <= 0:
+                await self._send_fail(writer, "invalid total_chunks", music_id)
+                return
 
-                final_path = _safe_download_path(filename)
-                tmp_path = final_path + ".part"
+            final_path = _safe_download_path(filename)
+            tmp_path = final_path + ".part"
 
-                received = 0
-                with open(tmp_path, "wb") as out:
-                    while received < total_chunks:
-                        if self._cancelled:
-                            await self._send_frame(writer, {
-                                "version": STP_VERSION,
-                                "msg_type": "TRANSFER_FAIL",
-                                "music_id": self.music_id,
-                                "reason": "cancelled",
-                            })
-                            raise ConnectionAbortedError("download cancelled")
+            await self._send_frame(writer, {
+                "version": STP_VERSION,
+                "msg_type": "TRANSFER_ACCEPT",
+                "music_id": music_id,
+                "filename": os.path.basename(final_path),
+                "resume_from": 0,
+                "chunk_size": chunk_size,
+                "status": "OK",
+            })
 
-                        hdr, payload = await self._recv_frame(reader)
-                        msg_type = hdr.get("msg_type")
+            received = 0
+            with open(tmp_path, "wb") as out:
+                while received < total_chunks:
+                    if self._cancelled:
+                        await self._send_fail(writer, "download cancelled", music_id)
+                        raise ConnectionAbortedError("download cancelled")
 
-                        if msg_type == "TRANSFER_FAIL":
-                            raise ConnectionError(hdr.get("reason", "provider failed"))
+                    hdr, payload = await self._recv_frame(reader)
+                    msg_type = hdr.get("msg_type")
 
-                        if msg_type != "CHUNK_DATA":
-                            continue
+                    if msg_type == "TRANSFER_FAIL":
+                        raise ConnectionError(hdr.get("reason", "provider failed"))
 
-                        expected_hash = hdr.get("chunk_hash", "")
-                        actual_hash = _chunk_sha256(payload)
+                    if msg_type != "CHUNK_DATA":
+                        continue
 
-                        if expected_hash and actual_hash != expected_hash:
-                            await self._send_frame(writer, {
-                                "version": STP_VERSION,
-                                "msg_type": "CHUNK_NACK",
-                                "music_id": self.music_id,
-                                "chunk_id": hdr.get("chunk_id", received),
-                                "reason": "chunk_hash mismatch",
-                            })
-                            continue
+                    expected_hash = hdr.get("chunk_hash", "")
+                    actual_hash = _chunk_sha256(payload)
 
-                        out.write(payload)
-                        received += 1
-
+                    if expected_hash and actual_hash != expected_hash:
                         await self._send_frame(writer, {
                             "version": STP_VERSION,
-                            "msg_type": "CHUNK_ACK",
-                            "music_id": self.music_id,
-                            "chunk_id": hdr.get("chunk_id", received - 1),
+                            "msg_type": "CHUNK_NACK",
+                            "music_id": music_id,
+                            "chunk_id": hdr.get("chunk_id", received),
+                            "reason": "chunk_hash mismatch",
                         })
+                        continue
 
-                        if self.progress_cb:
-                            self.progress_cb(received, total_chunks, self.music_id)
+                    out.write(payload)
+                    received += 1
 
-                end_hdr, _ = await self._recv_frame(reader)
-                if end_hdr.get("msg_type") != "TRANSFER_END":
-                    raise ValueError(f"expected TRANSFER_END, got {end_hdr}")
+                    await self._send_frame(writer, {
+                        "version": STP_VERSION,
+                        "msg_type": "CHUNK_ACK",
+                        "music_id": music_id,
+                        "chunk_id": hdr.get("chunk_id", received - 1),
+                    })
 
-                if expected_file_hash:
-                    actual_file_hash = _file_sha256(tmp_path)
-                    if actual_file_hash != expected_file_hash:
-                        raise ValueError(
-                            f"file hash mismatch: {actual_file_hash} != {expected_file_hash}"
-                        )
+                    if self.progress_cb:
+                        self.progress_cb(received, total_chunks, music_id)
 
-                os.replace(tmp_path, final_path)
+            end_hdr, _ = await self._recv_frame(reader)
+            if end_hdr.get("msg_type") != "TRANSFER_END":
+                raise ValueError(f"expected TRANSFER_END, got {end_hdr}")
 
-                if self.done_cb:
-                    self.done_cb(self.music_id, final_path)
+            if expected_file_hash:
+                actual_file_hash = _file_sha256(tmp_path)
+                if actual_file_hash != expected_file_hash:
+                    raise ValueError(
+                        f"file hash mismatch: {actual_file_hash} != {expected_file_hash}"
+                    )
 
-                return final_path
+            os.replace(tmp_path, final_path)
 
-            finally:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
+            if self.done_cb:
+                self.done_cb(music_id, final_path)
+
+            if self._done_future and not self._done_future.done():
+                self._done_future.set_result(final_path)
 
         except Exception as exc:
-            if self.error_cb:
-                self.error_cb(self.music_id, str(exc))
             if tmp_path and os.path.exists(tmp_path):
-                # Keep partial file only if you want resume. For now remove it to avoid confusion.
                 try:
                     os.remove(tmp_path)
                 except Exception:
                     pass
-            raise
+
+            if self.error_cb:
+                self.error_cb(music_id, str(exc))
+
+            if self._done_future and not self._done_future.done():
+                self._done_future.set_exception(exc)
+
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass

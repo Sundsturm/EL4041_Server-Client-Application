@@ -27,7 +27,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QStackedWidget, QStatusBar,
-    QMessageBox, QFrame,
+    QMessageBox, QFrame, QFileDialog,
 )
 
 from core.api_client import APIClient, APIError
@@ -41,6 +41,7 @@ from ui.transfer_window import TransferWindow
 from ui.history_window import HistoryWindow
 from ui.peer_status_window import PeerStatusWindow
 from ui.edit_profile_dialog import EditProfileDialog, DeleteProfileDialog
+from ui.transfer_requests_panel import TransferRequestsPanel
 
 
 NAV_ITEMS = [
@@ -49,6 +50,7 @@ NAV_ITEMS = [
     ("⇄  TRANSFERS", 2),
     ("◎  PEERS",     3),
     ("☰  HISTORY",   4),
+    ("⬇  REQUESTS",  5),
 ]
 
 
@@ -148,11 +150,13 @@ class MainWindow(QMainWindow):
         self._transfer_win = TransferWindow()
         self._peer_win     = PeerStatusWindow()
         self._history_win  = HistoryWindow()
+        self._requests_panel = TransferRequestsPanel()
 
         self._stack = QStackedWidget()
         for w in (
             self._search_win, self._publish_win,
             self._transfer_win, self._peer_win, self._history_win,
+            self._requests_panel,
         ):
             self._stack.addWidget(w)
 
@@ -180,8 +184,15 @@ class MainWindow(QMainWindow):
 
         # Transfer manager signals
         self._tm.progress_updated.connect(self._transfer_win.on_progress)
+        self._tm.upload_progress.connect(self._transfer_win.on_upload_progress)
         self._tm.transfer_done.connect(self._on_transfer_done)
         self._tm.transfer_failed.connect(self._on_transfer_failed)
+        self._tm.new_requests_received.connect(self._on_new_requests)
+
+        # Incoming transfer approval panel
+        self._requests_panel.approve_requested.connect(self._on_approve_transfer)
+        self._requests_panel.reject_requested.connect(self._on_reject_transfer)
+        self._requests_panel.refresh_requested.connect(self._on_manual_refresh_requests)
 
     # ─── Navigation ──────────────────────────────────────────────────────────
 
@@ -273,8 +284,10 @@ class MainWindow(QMainWindow):
         self._btn_edit_profile.setEnabled(True)
         self._btn_delete_profile.setEnabled(True)
         self._status(f"welcome, {username}")
+        self._tm.start_requests_polling()
 
     def _on_logout(self):
+        self._tm.stop_requests_polling()
         future = self._tm.submit_api(self._api.logout())
         self._lbl_user.setText("not signed in")
         self._lbl_user.setStyleSheet(
@@ -449,6 +462,137 @@ class MainWindow(QMainWindow):
         )
         self._tm.request_download(music_id, filename)
         self._status(f"download requested: {filename}")
+
+
+    # ─── Incoming Transfer Requests ─────────────────────────────────────────
+
+    def _on_new_requests(self, requests: list):
+        self._requests_panel.populate(requests)
+        self._status(f"{len(requests)} pending transfer request(s)")
+
+    def _on_manual_refresh_requests(self):
+        future = self._tm.submit_api(self._api.get_pending_requests(timeout=1))
+        self._status("checking transfer requests...")
+
+        def _check():
+            if future.done():
+                timer.stop()
+                try:
+                    data = future.result()
+                    requests = data.get("requests", [])
+                    self._requests_panel.populate(requests)
+                    self._status(f"{len(requests)} request(s) loaded")
+                except APIError as e:
+                    self._status(str(e), error=True)
+                    QMessageBox.warning(self, "Request Refresh Failed", str(e))
+
+        timer = QTimer(self)
+        timer.timeout.connect(_check)
+        timer.start(300)
+
+    def _on_approve_transfer(self, request_id: str, music_id: str):
+        future = self._tm.submit_api(self._api.approve_transfer(request_id))
+        self._status("approving transfer request...")
+
+        def _check():
+            if future.done():
+                timer.stop()
+                try:
+                    data = future.result()
+
+                    requester_ip = data["requester_ip"]
+                    requester_port = int(data["requester_port"])
+                    peer_token = data["peer_token"]
+
+                    resolved_music_id = data.get("music_id", music_id)
+                    filename = data.get("filename", "")
+                    mime_type = data.get("mime_type", "audio/mpeg")
+
+                    file_path = self._tm.get_shared_file(resolved_music_id)
+
+                    if not file_path:
+                        file_path, _ = QFileDialog.getOpenFileName(
+                            self,
+                            f"Locate file: {filename or resolved_music_id}",
+                            "",
+                            "Audio Files (*.mp3 *.flac *.wav *.aac *.ogg *.m4a);;All Files (*)",
+                        )
+
+                        if not file_path:
+                            self._tm.submit_api(
+                                self._api.reject_transfer(request_id, "file_not_found")
+                            )
+                            self._requests_panel.remove_request(request_id)
+                            self._status("transfer rejected: file not found", error=True)
+                            return
+
+                        self._tm.register_shared_file(resolved_music_id, file_path)
+
+                    self._navigate(2)
+                    self._transfer_win.add_transfer(
+                        f"upload_{request_id}",
+                        filename or file_path,
+                        "UPLOAD",
+                        cancel_cb=self._tm.cancel_transfer,
+                    )
+
+                    self._tm.submit_api(
+                        self._tm.approve_and_send(
+                            request_id=request_id,
+                            file_path=file_path,
+                            requester_ip=requester_ip,
+                            requester_port=requester_port,
+                            music_id=resolved_music_id,
+                            peer_token=peer_token,
+                            mime_type=mime_type,
+                            filename=filename,
+                        )
+                    )
+
+                    self._requests_panel.remove_request(request_id)
+                    self._status(f"sending {filename or resolved_music_id}...")
+
+                except APIError as e:
+                    self._status(str(e), error=True)
+                    QMessageBox.warning(self, "Approve Failed", str(e))
+                except Exception as e:
+                    self._status(str(e), error=True)
+                    QMessageBox.warning(self, "Approve Failed", str(e))
+
+        timer = QTimer(self)
+        timer.timeout.connect(_check)
+        timer.start(300)
+
+    def _on_reject_transfer(self, request_id: str):
+        confirm = QMessageBox.question(
+            self,
+            "Reject Transfer",
+            "Are you sure you want to reject this download request?"
+        )
+
+        if confirm != QMessageBox.Yes:
+            return
+
+        future = self._tm.submit_api(
+            self._api.reject_transfer(request_id, "rejected_by_owner")
+        )
+        self._status("rejecting transfer request...")
+
+        def _check():
+            if future.done():
+                timer.stop()
+                try:
+                    future.result()
+                    self._requests_panel.remove_request(request_id)
+                    self._status("transfer request rejected")
+                except APIError as e:
+                    self._status(str(e), error=True)
+                    QMessageBox.warning(self, "Reject Failed", str(e))
+
+        timer = QTimer(self)
+        timer.timeout.connect(_check)
+        timer.start(300)
+
 
     # ─── Publish ─────────────────────────────────────────────────────────────
 

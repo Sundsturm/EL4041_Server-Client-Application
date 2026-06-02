@@ -139,6 +139,9 @@ class TransferWindow(QWidget):
         if transfer_id in self._rows:
             self._rows[transfer_id].update_progress(done, total)
 
+    def on_upload_progress(self, transfer_id: str, done: int, total: int):
+        self.on_progress(transfer_id, done, total)
+
     def on_done(self, transfer_id: str, path: str):
         if transfer_id in self._rows:
             self._rows[transfer_id].set_done(path)
