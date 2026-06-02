@@ -3,7 +3,6 @@ ui/publish_window.py
 Publish a song: pick file, compute metadata, POST to server.
 """
 
-from curses import meta
 import hashlib
 import os
 
