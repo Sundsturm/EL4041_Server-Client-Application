@@ -18,8 +18,14 @@ import ssl
 import struct
 from typing import Any
 
-from aioquic.asyncio.client import connect
-from aioquic.quic.configuration import QuicConfiguration
+# aioquic is imported lazily inside send_request() so that REST mode
+# (--mode rest) can run on Termux even without aioquic installed.
+try:
+    from aioquic.asyncio.client import connect as _quic_connect
+    from aioquic.quic.configuration import QuicConfiguration as _QuicConfiguration
+    _AIOQUIC_AVAILABLE = True
+except ImportError:
+    _AIOQUIC_AVAILABLE = False
 
 from config import SERVER_HOST, SERVER_QUIC_PORT
 from core.auth_manager import AuthManager
@@ -76,7 +82,14 @@ class CSPClient:
         return msg
 
     async def send_request(self, msg_type: str, payload: dict | None = None, auth: bool = True) -> dict:
-        configuration = QuicConfiguration(is_client=True)
+        if not _AIOQUIC_AVAILABLE:
+            raise CSPError(
+                "Module 'aioquic' tidak ditemukan.\n"
+                "Jalankan dengan mode REST sebagai gantinya:\n"
+                "  python main.py --mode rest"
+            )
+
+        configuration = _QuicConfiguration(is_client=True)
         # Development-friendly for self-signed/Tailscale certs.
         # For production, install the server certificate and enable verification.
         configuration.verify_mode = ssl.CERT_NONE
@@ -84,7 +97,7 @@ class CSPClient:
         message = self._make_message(msg_type, payload, auth=auth)
         encoded = self._encode_message(message)
 
-        async with connect(self.host, self.port, configuration=configuration) as client:
+        async with _quic_connect(self.host, self.port, configuration=configuration) as client:
             reader, writer = await client.create_stream()
             writer.write(encoded)
             writer.write_eof()
