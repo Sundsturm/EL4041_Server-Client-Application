@@ -106,13 +106,34 @@ async def get_current_user(
     return user_id
 
 
+def _client_reachable_ip(request: Request) -> str | None:
+    """
+    Extract the client's reachable IP from the incoming connection.
+
+    Production/Tailscale:
+        The value should normally be a 100.x.x.x Tailscale IP.
+
+    Local development:
+        The value may be 127.0.0.1, ::1, 192.168.x.x, 10.x.x.x,
+        or another LAN/local address. This allows local P2P testing
+        without requiring every request to arrive through Tailscale.
+    """
+    if not request.client:
+        return None
+
+    ip = request.client.host
+
+    # Normalize IPv6 localhost to IPv4 localhost for desktop local testing.
+    if ip == "::1":
+        return "127.0.0.1"
+
+    return ip
+
+
+# Backward-compatible alias.
+# Existing route code can keep calling _tailscale_ip().
 def _tailscale_ip(request: Request) -> str | None:
-    """Extract the client's Tailscale IP from the incoming connection."""
-    if request.client:
-        ip = request.client.host
-        if ip.startswith(config.TAILSCALE_IP_PREFIX):
-            return ip
-    return None
+    return _client_reachable_ip(request)
 
 
 # ---------------------------------------------------------------------------
