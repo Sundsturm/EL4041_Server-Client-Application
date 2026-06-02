@@ -121,11 +121,10 @@ class CSPClient:
             return body.get("data") or {}
         return body
 
-    async def register(self, username: str, password: str, display_name: str = "") -> dict:
+    async def register(self, username: str, password: str) -> dict:
         return await self.send_request("REGISTER_REQ", {
             "username": username,
             "password": password,
-            "display_name": display_name or username,
         }, auth=False)
 
     async def login(self, username: str, password: str) -> dict:
@@ -135,7 +134,10 @@ class CSPClient:
         }, auth=False)
         self.auth.save_access_token(data["access_token"])
         self.auth.save_session_token(data["session_token"])
-        self.auth.save_profile({"user_id": data.get("user_id"), "username": username})
+        self.auth.save_profile({
+            "user_id": data.get("user_id"),
+            "username": username,
+        })
         return data
 
     async def logout(self) -> dict:
@@ -164,6 +166,29 @@ class CSPClient:
 
     async def history(self, history_type: str = "download") -> dict:
         return await self.send_request("HISTORY_REQ", {"history_type": history_type}, auth=True)
+
+    async def get_profile(self) -> dict:
+        return await self.send_request("GET_PROFILE_REQ", {}, auth=True)
+
+    async def update_profile(
+        self,
+        username: str = "",
+        bio: str = "",
+        password: str = "",
+    ) -> dict:
+        payload: dict = {}
+        if username:
+            payload["username"] = username
+        if bio:
+            payload["bio"] = bio
+        if password:
+            payload["password"] = password
+        return await self.send_request("UPDATE_PROFILE_REQ", payload, auth=True)
+
+    async def delete_profile(self, password: str) -> dict:
+        data = await self.send_request("DELETE_PROFILE_REQ", {"password": password}, auth=True)
+        self.auth.logout_local()
+        return data
 
     async def time_sync(self) -> dict:
         return await self.send_request("TIME_SYNC_REQ", {}, auth=False)

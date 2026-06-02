@@ -113,13 +113,12 @@ class APIClient:
             "username": username,
             "password": password,
         }, auth=False)
-        print("LOGIN RESPONSE:", data)
         # Persist tokens (data is already unwrapped inner dict)
         self._auth.save_access_token(data["access_token"])
         self._auth.save_session_token(data["session_token"])
         self._auth.save_profile({
             "user_id":  data.get("user_id"),
-            "username": username,   # server does not echo username, use the one we sent
+            "username": username,
         })
         return data
 
@@ -150,14 +149,12 @@ class APIClient:
 
     async def update_profile(
         self,
-        display_name: str = "",
         bio: str = "",
         password: str = "",
     ) -> dict:
         """POST /profile/update"""
 
         body = {
-            "display_name": display_name,
             "bio": bio,
         }
 

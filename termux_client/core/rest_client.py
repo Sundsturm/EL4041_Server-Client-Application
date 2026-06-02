@@ -49,11 +49,12 @@ class RESTClient:
             return body.get("data") or {}
         return body
 
-    async def register(self, username: str, password: str, display_name: str = "") -> dict:
+    # ─── Auth ─────────────────────────────────────────────────────────────────
+
+    async def register(self, username: str, password: str) -> dict:
         resp = await self.client.post("/register", json={
             "username": username,
             "password": password,
-            "display_name": display_name or username,
         })
         return self._unwrap(resp)
 
@@ -62,7 +63,10 @@ class RESTClient:
         data = self._unwrap(resp)
         self.auth.save_access_token(data["access_token"])
         self.auth.save_session_token(data["session_token"])
-        self.auth.save_profile({"user_id": data.get("user_id"), "username": username})
+        self.auth.save_profile({
+            "user_id": data.get("user_id"),
+            "username": username,
+        })
         return data
 
     async def logout(self) -> dict:
@@ -71,6 +75,43 @@ class RESTClient:
         data = self._unwrap(resp)
         self.auth.logout_local()
         return data
+
+    # ─── Profile ─────────────────────────────────────────────────────────────
+
+    async def get_profile(self) -> dict:
+        """GET /profile — fetch full profile from server."""
+        resp = await self.client.get("/profile", headers=self._headers())
+        return self._unwrap(resp)
+
+    async def update_profile(
+        self,
+        username: str = "",
+        bio: str = "",
+        password: str = "",
+    ) -> dict:
+        """POST /profile/update — update one or more profile fields."""
+        body: dict = {}
+        if username:
+            body["username"] = username
+        if bio:
+            body["bio"] = bio
+        if password:
+            body["password"] = password
+        resp = await self.client.post("/profile/update", json=body, headers=self._headers())
+        return self._unwrap(resp)
+
+    async def delete_profile(self, password: str) -> dict:
+        """POST /profile/delete — delete account and sign out locally."""
+        resp = await self.client.post(
+            "/profile/delete",
+            json={"password": password},
+            headers=self._headers(),
+        )
+        data = self._unwrap(resp)
+        self.auth.logout_local()
+        return data
+
+    # ─── Music ────────────────────────────────────────────────────────────────
 
     async def publish(self, metadata: dict) -> dict:
         resp = await self.client.post("/publish", json=metadata, headers=self._headers())

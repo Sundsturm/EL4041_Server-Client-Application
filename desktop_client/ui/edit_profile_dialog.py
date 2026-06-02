@@ -13,7 +13,6 @@ class EditProfileDialog(QDialog):
     def __init__(
         self,
         username: str = "",
-        display_name: str = "",
         bio: str = "",
         parent=None,
     ):
@@ -27,11 +26,6 @@ class EditProfileDialog(QDialog):
 
         self._lbl_username = QLabel(f"Username: {username}")
         lay.addWidget(self._lbl_username)
-
-        lay.addWidget(QLabel("Display Name"))
-        self._txt_display_name = QLineEdit()
-        self._txt_display_name.setText(display_name or "")
-        lay.addWidget(self._txt_display_name)
 
         lay.addWidget(QLabel("Bio"))
         self._txt_bio = QTextEdit()
@@ -80,7 +74,6 @@ class EditProfileDialog(QDialog):
 
     def data(self) -> dict:
         return {
-            "display_name": self._txt_display_name.text().strip(),
             "bio": self._txt_bio.toPlainText().strip(),
             "password": self._txt_password.text().strip(),
         }
