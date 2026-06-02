@@ -16,3 +16,10 @@ dist/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local client data
+client/profile/
+client/tokens/
+client/history/
+client/settings/
+client/music/

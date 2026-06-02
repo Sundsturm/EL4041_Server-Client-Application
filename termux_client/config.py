@@ -6,13 +6,13 @@ Central configuration for Android/Termux CLI client.
 from pathlib import Path
 
 # Change this to your server Tailscale IP / MagicDNS / LAN IP.
-SERVER_HOST = "127.0.0.1"
+SERVER_HOST = "100.98.237.27"
 
 # QUIC/CSP server port, based on the project context.
 SERVER_QUIC_PORT = 4433
 
 # REST fallback URL for development/testing.
-SERVER_REST_BASE_URL = "https://127.0.0.1:8443"
+SERVER_REST_BASE_URL = "https://100.98.237.27:8443"
 TLS_VERIFY = False
 
 # STP file transfer config.
