@@ -1,0 +1,9 @@
+# ── Server dependencies ────────────────────────────────────────────────────────
+fastapi>=0.111
+uvicorn[standard]>=0.29
+aioquic>=1.1
+aiosqlite>=0.20
+PyJWT>=2.8
+bcrypt>=4.1
+pydantic>=2.7
+cryptography>=42.0.0
