@@ -4,11 +4,17 @@ STP/TCP sender for Termux.
 
 This matches the server STP frame format:
 [16-byte binary header][JSON metadata][binary payload]
+
+Retry logic is built-in for connection-refused errors: the downloader
+may not have its listener ready yet when the owner approves (race
+condition). We retry up to MAX_CONNECT_ATTEMPTS times with exponential
+backoff before giving up.
 """
 
 from __future__ import annotations
 
 import socket
+import time
 from pathlib import Path
 
 from config import STP_CHUNK_SIZE
@@ -37,7 +43,32 @@ def send_file_to_peer(
     total_chunks = (size + STP_CHUNK_SIZE - 1) // STP_CHUNK_SIZE
     file_hash = sha256_file(path)
 
-    with socket.create_connection((peer_ip, peer_port), timeout=30) as conn:
+    MAX_CONNECT_ATTEMPTS = 3
+    CONNECT_RETRY_BASE_S  = 2.0   # first retry after 2 s, then 4 s, then 8 s
+
+    last_exc: Exception = ConnectionRefusedError("no attempts made")
+    for attempt in range(1, MAX_CONNECT_ATTEMPTS + 1):
+        try:
+            _conn = socket.create_connection((peer_ip, peer_port), timeout=30)
+            break
+        except (ConnectionRefusedError, OSError) as exc:
+            last_exc = exc
+            if attempt < MAX_CONNECT_ATTEMPTS:
+                wait = CONNECT_RETRY_BASE_S * (2 ** (attempt - 1))
+                print(
+                    f"[STP] connect attempt {attempt}/{MAX_CONNECT_ATTEMPTS} failed "
+                    f"({exc}). Retrying in {int(wait)}s…"
+                )
+                time.sleep(wait)
+            else:
+                raise ConnectionRefusedError(
+                    f"Could not connect to {peer_ip}:{peer_port} after "
+                    f"{MAX_CONNECT_ATTEMPTS} attempts. "
+                    f"Make sure the downloader is listening on that port. "
+                    f"Last error: {exc}"
+                ) from exc
+
+    with _conn as conn:
         req = build_transfer_req(
             peer_token=peer_token,
             music_id=music_id,

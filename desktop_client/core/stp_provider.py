@@ -8,6 +8,10 @@ transfer request, then sends the file over STP.
 
 Frame format:
     [4-byte FRAME_LEN][4-byte JSON_LEN][JSON HEADER][BINARY PAYLOAD]
+
+Retry logic is built-in: the downloader (Termux/desktop) may not have
+opened its listener port yet when the owner approves. We retry the TCP
+connection up to MAX_CONNECT_ATTEMPTS times with exponential backoff.
 """
 
 import asyncio
@@ -103,7 +107,29 @@ class STPProvider:
         ext = os.path.splitext(real_filename)[1].lower()
         real_mime = mime_type or SUPPORTED_MIME_TYPES.get(ext, "application/octet-stream")
 
-        reader, writer = await asyncio.open_connection(peer_ip, peer_port)
+        reader, writer = None, None
+        MAX_CONNECT_ATTEMPTS = 5
+        CONNECT_RETRY_BASE_S  = 2.0   # 2 s → 4 s → 8 s → 16 s → 32 s
+
+        for attempt in range(1, MAX_CONNECT_ATTEMPTS + 1):
+            try:
+                reader, writer = await asyncio.open_connection(peer_ip, peer_port)
+                break
+            except (ConnectionRefusedError, OSError) as exc:
+                if attempt < MAX_CONNECT_ATTEMPTS:
+                    wait = CONNECT_RETRY_BASE_S * (2 ** (attempt - 1))
+                    print(
+                        f"[STP PROVIDER] connect attempt {attempt}/{MAX_CONNECT_ATTEMPTS} "
+                        f"failed ({exc}). Retrying in {int(wait)}s…"
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    raise ConnectionRefusedError(
+                        f"Could not connect to {peer_ip}:{peer_port} after "
+                        f"{MAX_CONNECT_ATTEMPTS} attempts. "
+                        "Make sure the downloader is listening. "
+                        f"Last error: {exc}"
+                    ) from exc
 
         try:
             await self._send_frame(writer, {
@@ -192,8 +218,9 @@ class STPProvider:
             raise
 
         finally:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
+            if writer is not None:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
