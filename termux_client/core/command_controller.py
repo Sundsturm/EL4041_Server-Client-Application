@@ -90,9 +90,10 @@ class CommandController:
             "\n"
             "  Music  [login required]\n"
             "    publish <path>    — publish an audio file\n"
+            "    songs             — list all songs on server\n"
             "    search  <query>   — search songs\n"
             "    catalog           — list your published songs (local catalog)\n"
-            "    download <id>     — request download (non-blocking)\n"
+            "    download <id>     — request download (non-blocking, auto-listen)\n"
             "    downloads         — show in-progress / completed downloads\n"
             "    requests          — (owner) list pending download requests\n"
             "    approve <req_id>  — (owner) approve and send file\n"
@@ -161,6 +162,8 @@ class CommandController:
 
             elif cmd == "publish":
                 await self._publish(args)
+            elif cmd == "songs":
+                await self._songs()
             elif cmd == "search":
                 await self._search(args)
             elif cmd == "catalog":
@@ -474,6 +477,29 @@ class CommandController:
                 print(f"        {path}")
         print(_hr())
 
+    async def _songs(self) -> None:
+        """List semua lagu yang ada di server beserta metadata lengkapnya."""
+        if not self.auth.is_logged_in():
+            print("  You must be logged in to list songs."); return
+        print("  Fetching song catalogue from server…")
+        data = await self.api.list_songs()
+        songs = data.get("songs", data if isinstance(data, list) else [])
+
+        print(_hr()); print(f"  SERVER CATALOGUE  ({len(songs)} song{'s' if len(songs) != 1 else ''})"); print(_hr())
+        if not songs:
+            print("  No songs available yet. Be the first to publish!")
+        else:
+            for i, song in enumerate(songs, 1):
+                title  = song.get("title") or song.get("filename") or "Unknown"
+                artist = song.get("artist") or "Unknown artist"
+                album  = song.get("album") or ""
+                mid    = song.get("music_id") or "?"
+                owner  = song.get("owner") or song.get("owner_id") or "?"
+                album_str = f" / {album}" if album else ""
+                print(f"  [{i}] {title} — {artist}{album_str}")
+                print(f"      ID: {mid}   Uploader: {owner}")
+        print(_hr())
+
     # ─── DOWNLOAD (downloader side) ───────────────────────────────────────────
 
     async def _download(self, args: list[str]) -> None:
@@ -553,19 +579,24 @@ class CommandController:
             self._bg_tasks.pop(request_id, None)
 
     async def _downloads(self) -> None:
-        """Show in_progress and completed downloads (downloader side)."""
+        """Show in_progress and completed downloads only (downloader side)."""
         if not self.auth.is_logged_in():
             print("  You must be logged in."); return
 
-        # Also show any active background tasks
-        active_ids = set(self._bg_tasks.keys())
+        # Active background listener tasks (keyed by request_id)
+        active_ids = {k for k in self._bg_tasks if not k.startswith("recv_") and not k.startswith("send_")}
 
         data = await self.api.get_my_downloads()
-        items = data.get("downloads", [])
+        all_items = data.get("downloads", [])
+
+        # Filter: hanya tampilkan in_progress dan completed
+        SHOWN_STATUSES = {"in_progress", "completed"}
+        items = [i for i in all_items if i.get("status") in SHOWN_STATUSES]
 
         print(_hr()); print("  MY DOWNLOADS"); print(_hr())
         if not items and not active_ids:
-            print("  No downloads yet. Use 'download <id>' to start.")
+            print("  No active or completed downloads.")
+            print("  Use 'download <music_id>' to start a download.")
         else:
             for item in items:
                 icon   = _status_icon(item.get("status", ""))
@@ -576,10 +607,10 @@ class CommandController:
                 bg     = " [active]" if rid in active_ids else ""
                 print(f"  {icon} {title}" + (f" — {artist}" if artist else ""))
                 print(f"      Status: {status}{bg}   ID: {rid}")
-            # Pending tasks not yet server-tracked
+            # Background tasks belum terekam di server (baru diminta, menunggu approval)
             for rid in active_ids:
                 if not any(i.get("request_id") == rid for i in items):
-                    print(f"  ⏳ [pending approval]   ID: {rid}")
+                    print(f"  ⏳ [waiting approval]   ID: {rid}")
         print(_hr())
 
     # ─── REQUESTS / APPROVE / REJECT (owner side) ─────────────────────────────
