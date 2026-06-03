@@ -204,7 +204,7 @@ class CSPClient:
         return await self.send_request("HISTORY_REQ", {"history_type": history_type}, auth=True)
 
     async def get_profile(self) -> dict:
-        return await self.send_request("GET_PROFILE_REQ", {}, auth=True)
+        return await self.send_request("PROFILE_GET_REQ", {}, auth=True)
 
     async def update_profile(
         self,
@@ -219,10 +219,10 @@ class CSPClient:
             payload["bio"] = bio
         if password:
             payload["password"] = password
-        return await self.send_request("UPDATE_PROFILE_REQ", payload, auth=True)
+        return await self.send_request("PROFILE_UPDATE_REQ", payload, auth=True)
 
     async def delete_profile(self, password: str) -> dict:
-        data = await self.send_request("DELETE_PROFILE_REQ", {"password": password}, auth=True)
+        data = await self.send_request("PROFILE_DELETE_REQ", {"password": password}, auth=True)
         self.auth.logout_local()
         return data
 

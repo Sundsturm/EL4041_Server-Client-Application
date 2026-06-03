@@ -227,7 +227,14 @@ class CommandController:
             print("  Not logged in."); return
         name = self.auth.get_username()
         self._stop_heartbeat()
-        await self.api.logout()
+        try:
+            await self.api.logout()
+        except Exception as exc:
+            # Server-side logout gagal (koneksi putus, session sudah expired, dll.)
+            # Tetap bersihkan sesi lokal agar client tidak stuck dalam keadaan logged-in.
+            print(f"  ⚠ Server tidak dapat diakses saat logout ({exc}).")
+            print("  Sesi lokal dihapus.")
+        self.auth.logout_local()
         print(f"  ✓ Signed out. Goodbye, {name}!")
 
     # ─── Profile ──────────────────────────────────────────────────────────────
