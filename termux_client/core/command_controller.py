@@ -124,12 +124,15 @@ class CommandController:
             if cmd in {"exit", "quit"}:
                 if self.auth.is_logged_in():
                     print("  Logging out before exit…")
+                    self._stop_heartbeat()   # hentikan heartbeat sebelum logout request
                     try:
                         await self.api.logout()
                     except Exception:
+                        # Timeout atau server mati — bersihkan sesi lokal
                         self.auth.logout_local()
-                # Cancel heartbeat and any background tasks
-                self._stop_heartbeat()
+                else:
+                    self._stop_heartbeat()
+                # Cancel background transfer tasks
                 for task in self._bg_tasks.values():
                     task.cancel()
                 print("  Goodbye! ♪")

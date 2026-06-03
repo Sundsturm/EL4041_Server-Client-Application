@@ -132,6 +132,12 @@ async def delete_account(user_id: str, password: str) -> dict:
         (user_id,),
     )
 
+    # download_requests → references users(requester_id, provider_id) and music_metadata(music_id)
+    await db.execute(
+        "DELETE FROM download_requests WHERE requester_id = ? OR provider_id = ?",
+        (user_id, user_id),
+    )
+
     # music_metadata
     await db.execute(
         "DELETE FROM music_metadata WHERE owner_id = ?",

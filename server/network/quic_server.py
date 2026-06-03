@@ -20,6 +20,7 @@ MTU:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import struct
 from typing import Any
@@ -88,7 +89,7 @@ class CSPServerProtocol(QuicConnectionProtocol):
             )
             if event.end_stream:
                 raw = self._stream_buffers.pop(stream_id, b"")
-                self._quic._loop.create_task(
+                asyncio.ensure_future(
                     self._handle_stream(stream_id, raw)
                 )
 
@@ -198,7 +199,6 @@ async def run_quic_server() -> None:
     support the async context manager protocol.  We therefore call serve() with
     await and keep the server alive by waiting on a never-set asyncio.Event.
     """
-    import asyncio
 
     configuration = build_quic_configuration()
     server = await serve(

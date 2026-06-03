@@ -13,10 +13,16 @@ This version matches the server implementation:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import ssl
 import struct
 from typing import Any
+
+# Default timeout (seconds) for a CSP round-trip when server is reachable.
+CSP_REQUEST_TIMEOUT: float = 8.0
+# Shorter timeout used for logout / exit so the client doesn't hang.
+CSP_LOGOUT_TIMEOUT: float = 5.0
 
 # aioquic is imported lazily inside send_request() so that REST mode
 # (--mode rest) can run on Termux even without aioquic installed.
@@ -81,7 +87,13 @@ class CSPClient:
                 msg["access_token"] = token
         return msg
 
-    async def send_request(self, msg_type: str, payload: dict | None = None, auth: bool = True) -> dict:
+    async def send_request(
+        self,
+        msg_type: str,
+        payload: dict | None = None,
+        auth: bool = True,
+        timeout: float = CSP_REQUEST_TIMEOUT,
+    ) -> dict:
         if not _AIOQUIC_AVAILABLE:
             raise CSPError(
                 "Module 'aioquic' tidak ditemukan.\n"
@@ -97,17 +109,27 @@ class CSPClient:
         message = self._make_message(msg_type, payload, auth=auth)
         encoded = self._encode_message(message)
 
-        async with _quic_connect(self.host, self.port, configuration=configuration) as client:
-            reader, writer = await client.create_stream()
-            writer.write(encoded)
-            writer.write_eof()
+        async def _do_quic() -> list[bytes]:
+            async with _quic_connect(self.host, self.port, configuration=configuration) as client:
+                reader, writer = await client.create_stream()
+                writer.write(encoded)
+                writer.write_eof()
 
-            chunks: list[bytes] = []
-            while True:
-                data = await reader.read(65536)
-                if not data:
-                    break
-                chunks.append(data)
+                chunks: list[bytes] = []
+                while True:
+                    data = await reader.read(65536)
+                    if not data:
+                        break
+                    chunks.append(data)
+                return chunks
+
+        try:
+            chunks = await asyncio.wait_for(_do_quic(), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise CSPError(
+                f"Request '{msg_type}' timeout setelah {timeout:.0f}s "
+                "— server tidak dapat dijangkau."
+            )
 
         if not chunks:
             raise CSPError("No response from CSP server.")
@@ -141,7 +163,8 @@ class CSPClient:
         return data
 
     async def logout(self) -> dict:
-        data = await self.send_request("LOGOUT_REQ", {}, auth=True)
+        # Gunakan timeout pendek agar exit/logout tidak menggantung saat server mati.
+        data = await self.send_request("LOGOUT_REQ", {}, auth=True, timeout=CSP_LOGOUT_TIMEOUT)
         self.auth.logout_local()
         return data
 
