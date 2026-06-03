@@ -1,9 +1,12 @@
 """
 transfer/stp_sender.py
-STP/TCP sender for Termux.
+STP/TCP sender for Termux (owner side).
 
-This matches the server STP frame format:
-[16-byte binary header][JSON metadata][binary payload]
+Wire format — matches desktop stp_provider.py / stp_downloader.py:
+    [4-byte FRAME_LEN big-endian uint32]   = len(json_bytes) + len(payload)
+    [4-byte JSON_LEN  big-endian uint32]   = len(json_bytes)
+    [JSON_LEN bytes   UTF-8 JSON header]
+    [FRAME_LEN - JSON_LEN bytes  binary payload]
 
 Retry logic is built-in for connection-refused errors: the downloader
 may not have its listener ready yet when the owner approves (race
@@ -13,22 +16,51 @@ backoff before giving up.
 
 from __future__ import annotations
 
+import json
 import socket
+import struct
 import time
 from pathlib import Path
 
 from config import STP_CHUNK_SIZE
-from transfer.decoder import recv_frame
-from transfer.encoder import (
-    encode_frame,
-    build_transfer_req,
-    build_chunk_data,
-    build_transfer_end,
-    build_transfer_fail,
-)
-from transfer.integrity import sha256_file
-from transfer.protocol import MsgType
+from transfer.integrity import sha256_file, sha256_bytes
 
+
+# ---------------------------------------------------------------------------
+# Frame helpers (compatible with desktop stp_provider.py / stp_downloader.py)
+# ---------------------------------------------------------------------------
+
+def _build_frame(header: dict, payload: bytes = b"") -> bytes:
+    json_bytes = json.dumps(header).encode("utf-8")
+    json_len   = len(json_bytes)
+    frame_len  = json_len + len(payload)
+    return struct.pack(">II", frame_len, json_len) + json_bytes + payload
+
+
+def _recv_frame(sock: socket.socket) -> dict:
+    """Read one frame from sock; returns the JSON header dict."""
+    prefix = _recv_exact(sock, 8)
+    frame_len, json_len = struct.unpack(">II", prefix)
+    json_bytes = _recv_exact(sock, json_len)
+    _payload   = _recv_exact(sock, frame_len - json_len)   # consumed but not returned
+    return json.loads(json_bytes.decode("utf-8"))
+
+
+def _recv_exact(sock: socket.socket, n: int) -> bytes:
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError(
+                f"Connection closed after {len(buf)}/{n} bytes."
+            )
+        buf.extend(chunk)
+    return bytes(buf)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def send_file_to_peer(
     peer_ip: str,
@@ -38,21 +70,20 @@ def send_file_to_peer(
     peer_token: str,
     mime_type: str = "application/octet-stream",
 ) -> None:
-    path = Path(file_path)
-    size = path.stat().st_size
+    path         = Path(file_path)
+    size         = path.stat().st_size
     total_chunks = (size + STP_CHUNK_SIZE - 1) // STP_CHUNK_SIZE
-    file_hash = sha256_file(path)
+    file_hash    = sha256_file(path)
 
+    # ── Connect with retry (race-condition guard) ──────────────────────────
     MAX_CONNECT_ATTEMPTS = 3
-    CONNECT_RETRY_BASE_S  = 2.0   # first retry after 2 s, then 4 s, then 8 s
+    CONNECT_RETRY_BASE_S = 2.0   # 2 s → 4 s → 8 s
 
-    last_exc: Exception = ConnectionRefusedError("no attempts made")
     for attempt in range(1, MAX_CONNECT_ATTEMPTS + 1):
         try:
             _conn = socket.create_connection((peer_ip, peer_port), timeout=30)
             break
         except (ConnectionRefusedError, OSError) as exc:
-            last_exc = exc
             if attempt < MAX_CONNECT_ATTEMPTS:
                 wait = CONNECT_RETRY_BASE_S * (2 ** (attempt - 1))
                 print(
@@ -69,55 +100,74 @@ def send_file_to_peer(
                 ) from exc
 
     with _conn as conn:
-        req = build_transfer_req(
-            peer_token=peer_token,
-            music_id=music_id,
-            filename=path.name,
-            mime_type=mime_type,
-            file_size=size,
-            file_hash=file_hash,
-            total_chunks=total_chunks,
-            chunk_size=STP_CHUNK_SIZE,
-        )
-        conn.sendall(encode_frame(req))
+        # ── 1. Send TRANSFER_REQ ───────────────────────────────────────────
+        conn.sendall(_build_frame({
+            "msg_type":     "TRANSFER_REQ",
+            "peer_token":   peer_token,
+            "music_id":     music_id,
+            "filename":     path.name,
+            "mime_type":    mime_type,
+            "file_size":    size,
+            "file_hash":    file_hash,
+            "total_chunks": total_chunks,
+            "chunk_size":   STP_CHUNK_SIZE,
+        }))
 
-        # Some peers send TRANSFER_ACCEPT, some classroom implementations may not.
-        # Try to read it without making the sender unusable if the receiver is minimal.
-        conn.settimeout(3)
+        # ── 2. Wait for TRANSFER_ACCEPT ────────────────────────────────────
+        conn.settimeout(10)
         try:
-            response = recv_frame(conn)
-            if response.msg_type == MsgType.TRANSFER_FAIL:
-                raise RuntimeError(response.metadata.get("reason", "transfer rejected"))
+            accept = _recv_frame(conn)
+            if accept.get("msg_type") == "TRANSFER_FAIL":
+                raise RuntimeError(accept.get("reason", "transfer rejected"))
+            if accept.get("msg_type") != "TRANSFER_ACCEPT":
+                raise RuntimeError(
+                    f"Expected TRANSFER_ACCEPT, got {accept.get('msg_type')}"
+                )
         except socket.timeout:
+            # Receiver did not send TRANSFER_ACCEPT — proceed anyway
+            # (minimal receiver compatibility)
             pass
         finally:
             conn.settimeout(30)
 
+        # ── 3. Send chunks ─────────────────────────────────────────────────
         with path.open("rb") as f:
             for chunk_id in range(total_chunks):
-                chunk = f.read(STP_CHUNK_SIZE)
-                frame = build_chunk_data(
-                    music_id=music_id,
-                    chunk_id=chunk_id,
-                    payload=chunk,
-                    peer_token=peer_token,
-                    is_last=(chunk_id == total_chunks - 1),
-                )
-                conn.sendall(encode_frame(frame))
+                chunk      = f.read(STP_CHUNK_SIZE)
+                chunk_hash = sha256_bytes(chunk)
+                is_last    = chunk_id == total_chunks - 1
 
-                # Wait for ACK/NACK.
-                ack = recv_frame(conn)
-                if ack.msg_type == MsgType.CHUNK_NACK:
-                    # One simple retry for CLI version.
-                    conn.sendall(encode_frame(frame))
-                    ack = recv_frame(conn)
-                if ack.msg_type != MsgType.CHUNK_ACK:
-                    fail = build_transfer_fail("Expected CHUNK_ACK", music_id)
-                    conn.sendall(encode_frame(fail))
+                frame = _build_frame({
+                    "msg_type":     "CHUNK_DATA",
+                    "music_id":     music_id,
+                    "chunk_id":     chunk_id,
+                    "total_chunks": total_chunks,
+                    "chunk_size":   len(chunk),
+                    "chunk_hash":   chunk_hash,
+                    "is_last":      is_last,
+                }, payload=chunk)
+                conn.sendall(frame)
+
+                # Wait for ACK/NACK
+                ack = _recv_frame(conn)
+                if ack.get("msg_type") == "CHUNK_NACK":
+                    # One retry
+                    conn.sendall(frame)
+                    ack = _recv_frame(conn)
+                if ack.get("msg_type") != "CHUNK_ACK":
+                    conn.sendall(_build_frame({
+                        "msg_type": "TRANSFER_FAIL",
+                        "music_id": music_id,
+                        "reason":   "Expected CHUNK_ACK",
+                    }))
                     raise RuntimeError("Transfer failed: ACK not received")
 
                 print(f"[STP] sent chunk {chunk_id + 1}/{total_chunks}")
 
-        end = build_transfer_end(music_id, file_hash, peer_token, str(path))
-        conn.sendall(encode_frame(end))
+        # ── 4. Send TRANSFER_END ───────────────────────────────────────────
+        conn.sendall(_build_frame({
+            "msg_type": "TRANSFER_END",
+            "music_id": music_id,
+            "file_hash": file_hash,
+        }))
         print("[STP] file sent successfully")
