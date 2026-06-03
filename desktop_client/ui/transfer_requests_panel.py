@@ -30,25 +30,35 @@ class TransferRequestRow(QWidget):
             or self.request.get("filename")
             or "Unknown song"
         )
+
         artist = self.request.get("artist", "")
         filename = self.request.get("filename", "")
+
         requester = (
             self.request.get("requester_name")
             or self.request.get("requester_username")
             or self.request.get("requester_id")
             or "unknown peer"
         )
+
         created_at = self.request.get("created_at", "")
 
-        lbl_title = QLabel(f"⬇  {title}" + (f" — {artist}" if artist else ""))
-        lbl_title.setStyleSheet("font-size: 13px; color: #C8C8C8;")
+        lbl_title = QLabel(
+            f"⬇  {title}" + (f" — {artist}" if artist else "")
+        )
+        lbl_title.setStyleSheet(
+            "font-size: 13px; color: #C8C8C8;"
+        )
         lay.addWidget(lbl_title)
 
         detail = f"From: {requester}"
+
         if created_at:
             detail += f"  •  {created_at}"
+
         if filename:
             detail += f"\nFile: {filename}"
+
         detail += f"\nID: {self.request_id}"
 
         lbl_detail = QLabel(detail)
@@ -75,6 +85,10 @@ class TransferRequestRow(QWidget):
         sep.setFrameShape(QFrame.HLine)
         sep.setStyleSheet("color: #1A1A1A;")
         lay.addWidget(sep)
+
+    def set_busy(self, busy: bool):
+        self.btn_approve.setEnabled(not busy)
+        self.btn_reject.setEnabled(not busy)
 
 
 class TransferRequestsPanel(QWidget):
@@ -114,7 +128,8 @@ class TransferRequestsPanel(QWidget):
         self._container_lay = QVBoxLayout(self._container)
         self._container_lay.setContentsMargins(0, 0, 0, 0)
         self._container_lay.setSpacing(0)
-        self._container_lay.addStretch()
+
+        self._stretch = self._container_lay.addStretch()
 
         scroll.setWidget(self._container)
         lay.addWidget(scroll)
@@ -124,34 +139,85 @@ class TransferRequestsPanel(QWidget):
         lay.addWidget(self._lbl_empty)
 
     def populate(self, requests: list[dict]):
+        """
+        Replace the current request list with the latest server result.
+
+        This is important because a request may already be approved/rejected
+        on the server. Old rows must not stay visible after refresh.
+        """
+        self.clear()
+
+        if not requests:
+            self._lbl_empty.setText("no pending transfer requests")
+            self._lbl_empty.setVisible(True)
+            return
+
         for request in requests:
             self.add_request(request)
 
+        self._lbl_empty.setVisible(not self._rows)
+
     def add_request(self, request: dict):
         request_id = str(request.get("request_id", ""))
-        if not request_id or request_id in self._rows:
+
+        if not request_id:
             return
 
+        if request_id in self._rows:
+            self.remove_request(request_id)
+
         row = TransferRequestRow(request)
+
         row.btn_approve.clicked.connect(
-            lambda checked=False, r=row: self.approve_requested.emit(r.request_id, r.music_id)
+            lambda checked=False, r=row:
+            self._on_approve_clicked(r)
         )
+
         row.btn_reject.clicked.connect(
-            lambda checked=False, r=row: self.reject_requested.emit(r.request_id)
+            lambda checked=False, r=row:
+            self._on_reject_clicked(r)
         )
 
         count = self._container_lay.count()
         self._container_lay.insertWidget(count - 1, row)
+
         self._rows[request_id] = row
         self._lbl_empty.setVisible(False)
 
+    def _on_approve_clicked(self, row: TransferRequestRow):
+        row.set_busy(True)
+        self.approve_requested.emit(row.request_id, row.music_id)
+
+    def _on_reject_clicked(self, row: TransferRequestRow):
+        row.set_busy(True)
+        self.reject_requested.emit(row.request_id)
+
     def remove_request(self, request_id: str):
-        row = self._rows.pop(request_id, None)
+        row = self._rows.pop(str(request_id), None)
+
         if row:
             row.setParent(None)
             row.deleteLater()
+
         self._lbl_empty.setVisible(not self._rows)
 
     def clear(self):
         for request_id in list(self._rows.keys()):
-            self.remove_request(request_id)
+            row = self._rows.pop(request_id, None)
+
+            if row:
+                row.setParent(None)
+                row.deleteLater()
+
+        self._lbl_empty.setVisible(True)
+
+    def set_loading(self, loading: bool):
+        self._btn_refresh.setEnabled(not loading)
+
+        if loading:
+            self._lbl_empty.setText("loading transfer requests...")
+            if not self._rows:
+                self._lbl_empty.setVisible(True)
+        else:
+            self._lbl_empty.setText("no pending transfer requests")
+            self._lbl_empty.setVisible(not self._rows)
