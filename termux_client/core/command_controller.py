@@ -18,7 +18,7 @@ import getpass
 import shlex
 from pathlib import Path
 
-from config import SUPPORTED_AUDIO_EXTENSIONS, STP_LISTEN_PORT
+from config import SUPPORTED_AUDIO_EXTENSIONS, STP_LISTEN_PORT, HEARTBEAT_INTERVAL, HEARTBEAT_MAX_FAILS
 from core.auth_manager import AuthManager
 from core.audio_metadata import extract_metadata
 from core import catalog as music_catalog
@@ -67,6 +67,9 @@ class CommandController:
         self.auth = auth
         # Track background tasks keyed by request_id
         self._bg_tasks: dict[str, asyncio.Task] = {}
+        # Heartbeat state
+        self._heartbeat_task: asyncio.Task | None = None
+        self._heartbeat_failures: int = 0
 
     @staticmethod
     def help_text() -> str:
@@ -125,7 +128,8 @@ class CommandController:
                         await self.api.logout()
                     except Exception:
                         self.auth.logout_local()
-                # Cancel any background tasks
+                # Cancel heartbeat and any background tasks
+                self._stop_heartbeat()
                 for task in self._bg_tasks.values():
                     task.cancel()
                 print("  Goodbye! ♪")
@@ -215,11 +219,14 @@ class CommandController:
         print(f"  ✓ Welcome back, {self.auth.get_username()}!")
         print(f"    User ID  : {data.get('user_id', 'N/A')}")
         print(_hr())
+        # Start background heartbeat after successful login
+        self._start_heartbeat()
 
     async def _logout(self) -> None:
         if not self.auth.is_logged_in():
             print("  Not logged in."); return
         name = self.auth.get_username()
+        self._stop_heartbeat()
         await self.api.logout()
         print(f"  ✓ Signed out. Goodbye, {name}!")
 
@@ -298,11 +305,81 @@ class CommandController:
             print(f"  Session : Active")
             print(f"  User    : {profile.get('username', 'N/A')}")
             print(f"  User ID : {profile.get('user_id', 'N/A')}")
+            hb_status = "running" if (self._heartbeat_task and not self._heartbeat_task.done()) else "stopped"
+            print(f"  Heartbeat: {hb_status}  (interval: {HEARTBEAT_INTERVAL}s, failures: {self._heartbeat_failures}/{HEARTBEAT_MAX_FAILS})")
         else:
             print("  Session : Not logged in")
         from config import SERVER_REST_BASE_URL
         print(f"  Server  : {SERVER_REST_BASE_URL}")
         print(_hr())
+
+    # ─── Heartbeat ────────────────────────────────────────────────────────────
+
+    def _start_heartbeat(self) -> None:
+        """Start the background heartbeat task (idempotent)."""
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            return  # already running
+        self._heartbeat_failures = 0
+        loop = asyncio.get_event_loop()
+        self._heartbeat_task = loop.create_task(self._heartbeat_loop())
+
+    def _stop_heartbeat(self) -> None:
+        """Cancel the background heartbeat task."""
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+        self._heartbeat_task = None
+        self._heartbeat_failures = 0
+
+    async def _heartbeat_loop(self) -> None:
+        """
+        Background loop: ping server every HEARTBEAT_INTERVAL seconds.
+
+        Behaviour:
+          - Connection error/timeout → increment failure counter.
+            After HEARTBEAT_MAX_FAILS consecutive failures → auto-logout.
+          - 401/403/Unauthorized → immediate auto-logout (token expired).
+          - Success → reset failure counter.
+        """
+        while True:
+            await asyncio.sleep(HEARTBEAT_INTERVAL)
+
+            # Stop if user already manually logged out
+            if not self.auth.is_logged_in():
+                break
+
+            try:
+                await self.api.heartbeat()
+                self._heartbeat_failures = 0  # server responded OK
+
+            except Exception as exc:
+                err_lower = str(exc).lower()
+                is_auth_error = any(
+                    k in err_lower
+                    for k in ("401", "403", "unauthorized", "forbidden",
+                               "invalid token", "expired", "not authenticated")
+                )
+
+                if is_auth_error:
+                    # Token invalid/expired → logout immediately
+                    print(
+                        "\n  ⚠ [HEARTBEAT] Sesi tidak valid / token kedaluwarsa. "
+                        "Anda di-logout otomatis."
+                        "\n  Ketik 'login' untuk masuk kembali."
+                    )
+                    self.auth.logout_local()
+                    break
+
+                self._heartbeat_failures += 1
+                if self._heartbeat_failures >= HEARTBEAT_MAX_FAILS:
+                    print(
+                        f"\n  ⚠ [HEARTBEAT] Server tidak dapat dijangkau "
+                        f"({self._heartbeat_failures}x berturut-turut). "
+                        "Anda di-logout otomatis."
+                        "\n  Ketik 'login' untuk masuk kembali saat server aktif."
+                    )
+                    self.auth.logout_local()
+                    break
+                # Else: silent — might be transient network hiccup
 
     # ─── Music commands ───────────────────────────────────────────────────────
 
@@ -396,6 +473,21 @@ class CommandController:
             print("  Usage: download <music_id>"); return
 
         music_id = args[1]
+
+        # Cancel any existing listener task for the same music_id (retry scenario).
+        # The old task holds port 5050 open; cancelling it frees the port for the new request.
+        old_task_key = f"recv_{music_id}"
+        if old_task_key in self._bg_tasks:
+            print(f"  Cancelling previous listener for this song…")
+            self._bg_tasks[old_task_key].cancel()
+            try:
+                await asyncio.shield(self._bg_tasks[old_task_key])
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._bg_tasks.pop(old_task_key, None)
+            # Brief pause so the OS releases the port
+            await asyncio.sleep(0.5)
+
         print(f"  Submitting download request for ID: {music_id}…")
         data = await self.api.download(music_id, requester_port=STP_LISTEN_PORT)
 
@@ -406,16 +498,16 @@ class CommandController:
         print(f"  ✓ Request submitted!")
         print(f"    Song       : {song_title}")
         print(f"    Request ID : {request_id}")
-        print(f"  Waiting for owner to approve…")
+        print(f"  Waiting for owner to approve… (timeout: 5 min)")
         print(f"  STP listener starting in background on port {STP_LISTEN_PORT}…")
         print(_hr())
 
-        # Spawn non-blocking background task: wait for owner to connect
         loop = asyncio.get_event_loop()
         task = loop.create_task(
             self._bg_receive(request_id, music_id, song_title)
         )
         self._bg_tasks[request_id] = task
+        self._bg_tasks[old_task_key] = task   # index by music_id for easy cancel on retry
 
     async def _bg_receive(
         self, request_id: str, music_id: str, song_title: str

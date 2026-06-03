@@ -72,8 +72,20 @@ async def request_download(
     if row["peer_status"] != "online":
         return err("The owner of this song is currently offline.")
 
-    request_id = str(uuid.uuid4())
+    # Cancel any previous pending requests from this requester for the same song.
+    # This prevents the owner from seeing stale requests after a retry,
+    # and ensures only the latest request_id is active.
     now = _utcnow_iso()
+    await db.execute(
+        """
+        UPDATE download_requests
+        SET status = 'superseded', updated_at = ?
+        WHERE requester_id = ? AND music_id = ? AND status = 'pending'
+        """,
+        (now, requester_id, music_id),
+    )
+
+    request_id = str(uuid.uuid4())
 
     await db.execute(
         """

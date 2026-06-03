@@ -14,6 +14,11 @@ async def run_cli(controller: CommandController) -> None:
     print("  Type 'help' for a list of commands.")
     print("=" * 52)
 
+    # If a session is already persisted from a previous run, resume heartbeat
+    if controller.auth.is_logged_in():
+        controller._start_heartbeat()
+        print(f"  ↺  Resuming session as @{controller.auth.get_username()}. Heartbeat active.")
+
     running = True
     while running:
         # Dynamic prompt: show @username when logged in, else "stp"

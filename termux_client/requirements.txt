@@ -1,3 +1,29 @@
 # ── Termux Client dependencies (Android) ──────────────────────────────────────
-httpx>=0.27.0
-mutagen>=1.47.0
+#
+# Install via:  pip install -r requirements.txt
+#
+# ── Always required ────────────────────────────────────────────────────────────
+mutagen>=1.47.0          # Audio metadata extraction (MP3/FLAC/AAC/etc.)
+
+# ── Required for REST mode (--mode rest) ──────────────────────────────────────
+httpx>=0.27.0            # HTTP client for REST/HTTPS fallback
+
+# ── Required for CSP/QUIC mode (--mode csp, DEFAULT) ─────────────────────────
+# aioquic is NOT on PyPI as a pre-built ARM wheel.
+# On Termux/Android, install via ONE of the following methods:
+#
+# Method 1 (recommended — uses TUR pre-built binary):
+#   pkg install tur-repo -y
+#   pkg install python-cryptography -y
+#   pip install --system-site-packages aioquic
+#
+# Method 2 (compile from source — slower, ~10 min):
+#   pkg install rust binutils-is-llvm clang make libffi openssl -y
+#   export CARGO_BUILD_TARGET="$(rustc -Vv | grep 'host' | awk '{print $2}')"
+#   export CFLAGS="-Wno-register" CXXFLAGS="-Wno-register"
+#   pip install aioquic
+#
+# After installation, verify with:
+#   python -c "import aioquic; print('OK:', aioquic.__version__)"
+#
+# aioquic>=1.0.0

@@ -20,6 +20,10 @@ STP_LISTEN_HOST = "0.0.0.0"
 STP_LISTEN_PORT = 5050
 STP_CHUNK_SIZE = 64 * 1024
 
+# Heartbeat / server-monitor config.
+HEARTBEAT_INTERVAL   = 30   # seconds between each ping
+HEARTBEAT_MAX_FAILS  = 3    # consecutive failures before auto-logout
+
 # Local storage folders.
 BASE_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = BASE_DIR / "profile"

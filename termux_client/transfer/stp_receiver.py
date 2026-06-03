@@ -18,16 +18,27 @@ from transfer.integrity import sha256_bytes, sha256_file, hmac_sha256, hmac_sha2
 from transfer.protocol import MsgType
 
 
-def serve_once(host: str = STP_LISTEN_HOST, port: int = STP_LISTEN_PORT) -> Path | None:
+def serve_once(
+    host: str = STP_LISTEN_HOST,
+    port: int = STP_LISTEN_PORT,
+    accept_timeout: float = 300.0,   # 5 minutes: owner has this long to approve + connect
+) -> Path | None:
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"[STP] listening on {host}:{port}")
+    print(f"[STP] listening on {host}:{port} (timeout: {int(accept_timeout)}s)")
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((host, port))
         server.listen(1)
+        server.settimeout(accept_timeout)
 
-        conn, addr = server.accept()
+        try:
+            conn, addr = server.accept()
+        except socket.timeout:
+            raise TimeoutError(
+                f"No connection received within {int(accept_timeout)}s. "
+                "Owner may not have approved in time. Please retry with 'download <id>'."
+            )
         print(f"[STP] connected from {addr}")
 
         with conn:

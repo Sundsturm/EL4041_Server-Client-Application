@@ -185,3 +185,8 @@ class RESTClient:
     async def history(self, history_type: str = "download") -> dict:
         resp = await self.client.get("/history", params={"history_type": history_type}, headers=self._headers())
         return self._unwrap(resp)
+
+    async def heartbeat(self) -> dict:
+        """Lightweight ping: verifies server reachability and token validity."""
+        resp = await self.client.get("/profile", headers=self._headers(), timeout=10.0)
+        return self._unwrap(resp)
