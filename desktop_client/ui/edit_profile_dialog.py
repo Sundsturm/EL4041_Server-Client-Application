@@ -24,8 +24,10 @@ class EditProfileDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.setSpacing(12)
 
-        self._lbl_username = QLabel(f"Username: {username}")
-        lay.addWidget(self._lbl_username)
+        lay.addWidget(QLabel("Username"))
+        self._txt_username = QLineEdit(username)
+        self._txt_username.setPlaceholderText("leave empty to keep current")
+        lay.addWidget(self._txt_username)
 
         lay.addWidget(QLabel("Bio"))
         self._txt_bio = QTextEdit()
@@ -48,6 +50,9 @@ class EditProfileDialog(QDialog):
         self._btn_save = QPushButton("SAVE PROFILE")
         self._btn_save.clicked.connect(self._validate_and_accept)
         lay.addWidget(self._btn_save)
+
+        # Store initial username for change detection
+        self._initial_username = username
 
     def _validate_and_accept(self):
         password = self._txt_password.text()
@@ -73,7 +78,9 @@ class EditProfileDialog(QDialog):
         self.accept()
 
     def data(self) -> dict:
+        new_username = self._txt_username.text().strip()
         return {
+            "username": new_username if new_username != self._initial_username else "",
             "bio": self._txt_bio.toPlainText().strip(),
             "password": self._txt_password.text().strip(),
         }

@@ -263,7 +263,7 @@ class CommandController:
         print(f"    Username   : {data.get('username', 'N/A')}")
         print(f"    User ID    : {data.get('user_id', 'N/A')}")
         print(f"    Bio        : {data.get('bio') or '—'}")
-        print(f"    Created at : {data.get('created_at', 'N/A')}")
+        print(f"    Created at : {str(data.get('created_at', 'N/A'))[:19]}")
         print(_hr())
 
     async def _edit_profile(self) -> None:
@@ -275,10 +275,13 @@ class CommandController:
             current = self.auth.get_profile()
         print(_hr()); print("  EDIT PROFILE  (press Enter to keep current value)"); print(_hr())
         new_username = _prompt_optional("Username", current=current.get("username", ""))
+        new_bio      = _prompt_optional("Bio",      current=current.get("bio", ""))
         new_password = _prompt_optional("New password", secret=True)
         payload: dict = {}
         if new_username and new_username != current.get("username"):
             payload["username"] = new_username
+        if new_bio != current.get("bio", ""):
+            payload["bio"] = new_bio
         if new_password:
             payload["password"] = new_password
         if not payload:

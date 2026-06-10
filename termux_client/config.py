@@ -11,10 +11,6 @@ SERVER_HOST = "100.98.237.27"
 # QUIC/CSP server port, based on the project context.
 SERVER_QUIC_PORT = 4433
 
-# REST fallback URL for development/testing.
-SERVER_REST_BASE_URL = "https://100.98.237.27:8443"
-TLS_VERIFY = False
-
 # STP file transfer config.
 STP_LISTEN_HOST = "0.0.0.0"
 STP_LISTEN_PORT = 5050

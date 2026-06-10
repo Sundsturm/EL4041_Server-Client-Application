@@ -14,13 +14,14 @@ from server.services import logging_service
 async def get_profile(user_id: str) -> dict:
     """
     GET /profile
-    Returns the user's profile data (username, display_name, bio).
+    Returns the user's profile data (user_id, username, bio, created_at).
+    display_name is removed — username is the single name field.
     """
     db = await get_db()
 
     async with db.execute(
         """
-        SELECT u.username, p.display_name, p.bio
+        SELECT u.user_id, u.username, u.created_at, p.bio
         FROM users u
         LEFT JOIN profiles p ON p.user_id = u.user_id
         WHERE u.user_id = ?
@@ -32,30 +33,49 @@ async def get_profile(user_id: str) -> dict:
     if row is None:
         return err("User not found.")
 
-    return ok({"profile": dict(row)})
+    return ok(dict(row))
 
 
 async def update_profile(
     user_id: str,
-    display_name: str = "",
+    username: str = "",
     bio: str = "",
     password: str = "",
 ) -> dict:
     """
     POST /profile/update
-    Updates display_name and bio. Optionally changes the password.
+    Updates username (in users table) and/or bio (in profiles table).
+    Optionally changes the password.
+    display_name is removed; username is the single name field.
     """
     db = await get_db()
 
-    # Update profile fields
-    await db.execute(
-        """
-        UPDATE profiles
-        SET display_name = ?, bio = ?
-        WHERE user_id = ?
-        """,
-        (display_name, bio, user_id),
-    )
+    # Update username in users table (if provided)
+    if username:
+        # Check uniqueness before updating
+        async with db.execute(
+            "SELECT user_id FROM users WHERE username = ? AND user_id != ?",
+            (username, user_id),
+        ) as cur:
+            conflict = await cur.fetchone()
+        if conflict:
+            return err(f"Username '{username}' is already taken.")
+
+        await db.execute(
+            "UPDATE users SET username = ? WHERE user_id = ?",
+            (username, user_id),
+        )
+
+    # Update bio in profiles table (if provided)
+    if bio is not None and bio != "":
+        await db.execute(
+            """
+            INSERT INTO profiles (user_id, bio)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET bio = excluded.bio
+            """,
+            (user_id, bio),
+        )
 
     # If a new password was supplied, hash and store it
     if password:
@@ -69,7 +89,7 @@ async def update_profile(
 
     await logging_service.log(
         "INFO", "profile",
-        f"PROFILE UPDATE | user_id={user_id} | password_changed={bool(password)}"
+        f"PROFILE UPDATE | user_id={user_id} | username_changed={bool(username)} | password_changed={bool(password)}"
     )
     return ok(message="Profile updated successfully.")
 

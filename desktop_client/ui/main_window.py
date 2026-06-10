@@ -312,12 +312,13 @@ class MainWindow(QMainWindow):
                 timer.stop()
                 try:
                     data = future.result()
-                    profile = data.get("profile", {})
+                    # Server sekarang mengembalikan flat dict (bukan nested "profile")
+                    current_username = data.get("username", username)
+                    current_bio      = data.get("bio", "")
 
                     dlg = EditProfileDialog(
-                        username=profile.get("username", username),
-                        display_name=profile.get("display_name", ""),
-                        bio=profile.get("bio", ""),
+                        username=current_username,
+                        bio=current_bio,
                         parent=self,
                     )
 
@@ -328,7 +329,7 @@ class MainWindow(QMainWindow):
                     payload = dlg.data()
                     update_future = self._tm.submit_api(
                         self._api.update_profile(
-                            display_name=payload["display_name"],
+                            username=payload["username"],
                             bio=payload["bio"],
                             password=payload["password"],
                         )
@@ -340,6 +341,15 @@ class MainWindow(QMainWindow):
                             update_timer.stop()
                             try:
                                 update_future.result()
+                                # Update sidebar label jika username berubah
+                                if payload["username"]:
+                                    self._auth.save_profile({
+                                        **self._auth.get_profile(),
+                                        "username": payload["username"],
+                                    })
+                                    self._lbl_user.setText(
+                                        f"signed in as\n{payload['username']}"
+                                    )
                                 self._status("profile updated")
                                 QMessageBox.information(
                                     self,

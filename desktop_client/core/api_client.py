@@ -156,15 +156,16 @@ class APIClient:
 
     async def update_profile(
         self,
-        display_name: str = "",
+        username: str = "",
         bio: str = "",
         password: str = "",
     ) -> dict:
         """POST /profile/update"""
-        body = {
-            "display_name": display_name,
-            "bio": bio,
-        }
+        body: dict = {}
+        if username:
+            body["username"] = username
+        if bio is not None:
+            body["bio"] = bio
         if password:
             body["password"] = password
         return await self._post("/profile/update", body)

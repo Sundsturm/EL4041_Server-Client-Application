@@ -24,8 +24,6 @@ CSP_REQUEST_TIMEOUT: float = 8.0
 # Shorter timeout used for logout / exit so the client doesn't hang.
 CSP_LOGOUT_TIMEOUT: float = 5.0
 
-# aioquic is imported lazily inside send_request() so that REST mode
-# (--mode rest) can run on Termux even without aioquic installed.
 try:
     from aioquic.asyncio.client import connect as _quic_connect
     from aioquic.quic.configuration import QuicConfiguration as _QuicConfiguration
@@ -97,8 +95,7 @@ class CSPClient:
         if not _AIOQUIC_AVAILABLE:
             raise CSPError(
                 "Module 'aioquic' tidak ditemukan.\n"
-                "Jalankan dengan mode REST sebagai gantinya:\n"
-                "  python main.py --mode rest"
+                "Install dengan: pip install aioquic"
             )
 
         configuration = _QuicConfiguration(is_client=True)

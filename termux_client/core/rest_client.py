@@ -1,16 +1,18 @@
 """
 core/rest_client.py
-REST fallback client for development/testing.
-The main target for Android is CSP over QUIC, but this helps test quickly.
+[DEPRECATED] — REST fallback client. Tidak lagi digunakan oleh termux_client.
+Termux client sekarang menggunakan CSP/QUIC (csp_client.py) secara eksklusif.
+File ini dipertahankan sebagai referensi arsitektur.
 """
-
-from __future__ import annotations
 
 import httpx
 from typing import Any
 
-from config import SERVER_REST_BASE_URL, TLS_VERIFY
 from core.auth_manager import AuthManager
+
+# REST config: hardcoded karena sudah dihapus dari config.py
+_REST_BASE_URL = "https://100.98.237.27:8443"
+_TLS_VERIFY    = False
 
 
 class RESTError(Exception):
@@ -21,8 +23,8 @@ class RESTClient:
     def __init__(self, auth: AuthManager):
         self.auth = auth
         self.client = httpx.AsyncClient(
-            base_url=SERVER_REST_BASE_URL.rstrip("/"),
-            verify=TLS_VERIFY,
+            base_url=_REST_BASE_URL.rstrip("/"),
+            verify=_TLS_VERIFY,
             timeout=30.0,
         )
 

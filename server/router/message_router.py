@@ -203,7 +203,7 @@ async def dispatch(
     if msg_type == "PROFILE_UPDATE_REQ":
         return await profile_service.update_profile(
             user_id=user_id,
-            display_name=payload.get("display_name", ""),
+            username=payload.get("username", ""),
             bio=payload.get("bio", ""),
             password=payload.get("password", ""),
         )
