@@ -12,16 +12,23 @@ httpx>=0.27.0            # HTTP client for REST/HTTPS fallback
 # aioquic is NOT on PyPI as a pre-built ARM wheel.
 # On Termux/Android, install via ONE of the following methods:
 #
-# Method 1 (recommended — uses TUR pre-built binary):
+# Quick Fix (recommended — jika aioquic sudah terinstall tapi tidak ditemukan):
+#   python -m pip install --upgrade --break-system-packages aioquic
+#
+#   Penjelasan: pip biasa di Termux terkadang menginstall ke lokasi berbeda
+#   dari Python sistem. Flag --break-system-packages memaksa pip menulis
+#   langsung ke system site-packages agar dapat diakses oleh semua Python.
+#
+# Method 1 (TUR pre-built binary — tanpa compile Rust):
 #   pkg install tur-repo -y
 #   pkg install python-cryptography -y
-#   pip install --system-site-packages aioquic
+#   python -m pip install --upgrade --break-system-packages aioquic
 #
-# Method 2 (compile from source — slower, ~10 min):
-#   pkg install rust binutils-is-llvm clang make libffi openssl -y
+# Method 2 (compile from source — slower, ~10-20 menit):
+#   pkg install rust binutils clang make libffi openssl -y
 #   export CARGO_BUILD_TARGET="$(rustc -Vv | grep 'host' | awk '{print $2}')"
 #   export CFLAGS="-Wno-register" CXXFLAGS="-Wno-register"
-#   pip install aioquic
+#   python -m pip install --break-system-packages aioquic
 #
 # After installation, verify with:
 #   python -c "import aioquic; print('OK:', aioquic.__version__)"

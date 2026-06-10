@@ -28,7 +28,10 @@ try:
     from aioquic.asyncio.client import connect as _quic_connect
     from aioquic.quic.configuration import QuicConfiguration as _QuicConfiguration
     _AIOQUIC_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError, AttributeError):
+    # ImportError  : modul tidak terinstall
+    # OSError      : C extension gagal load (shared library missing, e.g. libssl.so)
+    # AttributeError: submodul aioquic berubah nama di versi tertentu
     _AIOQUIC_AVAILABLE = False
 
 from config import SERVER_HOST, SERVER_QUIC_PORT
@@ -94,8 +97,10 @@ class CSPClient:
     ) -> dict:
         if not _AIOQUIC_AVAILABLE:
             raise CSPError(
-                "Module 'aioquic' tidak ditemukan.\n"
-                "Install dengan: pip install aioquic"
+                "Module 'aioquic' tidak ditemukan atau gagal diload.\n"
+                "Untuk Termux/Android, install dengan:\n"
+                "  python -m pip install --upgrade --break-system-packages aioquic\n"
+                "Verifikasi: python -c \"from aioquic.asyncio.client import connect; print('OK')\""
             )
 
         configuration = _QuicConfiguration(is_client=True)
