@@ -221,3 +221,21 @@ async def _migrate_schema() -> None:
     )
 
     await db.commit()
+
+    # Sync display_name: pastikan profiles.display_name selalu sama dengan users.username
+    # untuk semua user yang ada (idempotent — aman dijalankan berulang kali).
+    await db.execute(
+        """
+        UPDATE profiles
+        SET display_name = (
+            SELECT username FROM users WHERE users.user_id = profiles.user_id
+        )
+        WHERE display_name IS NULL
+           OR display_name = ''
+           OR display_name != (
+               SELECT username FROM users WHERE users.user_id = profiles.user_id
+           )
+        """
+    )
+    await db.commit()
+    print("[DB] Migration: profiles.display_name synced with users.username.")

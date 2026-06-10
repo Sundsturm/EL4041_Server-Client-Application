@@ -260,10 +260,11 @@ class CommandController:
         print("  Fetching profile…")
         data = await self.api.get_profile()
         print(_hr()); print("  PROFILE"); print(_hr())
-        print(f"    Username   : {data.get('username', 'N/A')}")
-        print(f"    User ID    : {data.get('user_id', 'N/A')}")
-        print(f"    Bio        : {data.get('bio') or '—'}")
-        print(f"    Created at : {str(data.get('created_at', 'N/A'))[:19]}")
+        print(f"    Username     : {data.get('username', 'N/A')}")
+        print(f"    Display Name : {data.get('display_name') or data.get('username', '—')}")
+        print(f"    User ID      : {data.get('user_id', 'N/A')}")
+        print(f"    Bio          : {data.get('bio') or '—'}")
+        print(f"    Created at   : {str(data.get('created_at', 'N/A'))[:19]}")
         print(_hr())
 
     async def _edit_profile(self) -> None:

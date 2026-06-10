@@ -14,14 +14,14 @@ from server.services import logging_service
 async def get_profile(user_id: str) -> dict:
     """
     GET /profile
-    Returns the user's profile data (user_id, username, bio, created_at).
-    display_name is removed — username is the single name field.
+    Returns the user's profile data: user_id, username, display_name, bio, created_at.
+    display_name selalu sinkron dengan username (di-copy otomatis saat username diubah).
     """
     db = await get_db()
 
     async with db.execute(
         """
-        SELECT u.user_id, u.username, u.created_at, p.bio
+        SELECT u.user_id, u.username, u.created_at, p.display_name, p.bio
         FROM users u
         LEFT JOIN profiles p ON p.user_id = u.user_id
         WHERE u.user_id = ?
@@ -64,6 +64,16 @@ async def update_profile(
         await db.execute(
             "UPDATE users SET username = ? WHERE user_id = ?",
             (username, user_id),
+        )
+        # Sync display_name di profiles agar selalu mencerminkan username terbaru.
+        # Jika row profiles belum ada (user lama), buat dulu dengan bio kosong.
+        await db.execute(
+            """
+            INSERT INTO profiles (user_id, display_name, bio)
+            VALUES (?, ?, '')
+            ON CONFLICT(user_id) DO UPDATE SET display_name = excluded.display_name
+            """,
+            (user_id, username),
         )
 
     # Update bio in profiles table (if provided)
