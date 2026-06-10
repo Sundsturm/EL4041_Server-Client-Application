@@ -13,6 +13,7 @@ class EditProfileDialog(QDialog):
     def __init__(
         self,
         username: str = "",
+        display_name: str = "",
         bio: str = "",
         parent=None,
     ):
