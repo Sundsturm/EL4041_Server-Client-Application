@@ -326,8 +326,8 @@ class CommandController:
             print(f"  Heartbeat: {hb_status}  (interval: {HEARTBEAT_INTERVAL}s, failures: {self._heartbeat_failures}/{HEARTBEAT_MAX_FAILS})")
         else:
             print("  Session : Not logged in")
-        from config import SERVER_REST_BASE_URL
-        print(f"  Server  : {SERVER_REST_BASE_URL}")
+        from config import SERVER_HOST, SERVER_QUIC_PORT
+        print(f"  Server  : {SERVER_HOST}:{SERVER_QUIC_PORT} (CSP/QUIC)")
         print(_hr())
 
     # ─── Heartbeat ────────────────────────────────────────────────────────────
@@ -771,21 +771,56 @@ class CommandController:
             return
 
         print(f"  Fetching '{history_type}' history…")
-        data    = await self.api.history(history_type)
-        records = data if isinstance(data, list) else data.get("records", data.get("logs", []))
+        data = await self.api.history(history_type)
+
+        # Server mengembalikan {"history": [...]}, bukan "records" atau "logs"
+        records = (
+            data if isinstance(data, list)
+            else data.get("history", data.get("records", data.get("logs", [])))
+        )
 
         print(_hr()); print(f"  HISTORY — {history_type.upper()}"); print(_hr())
         if not records:
             print("  No records found.")
         else:
             for rec in records:
-                if isinstance(rec, dict):
-                    ts  = rec.get("created_at") or rec.get("timestamp", "")
+                if not isinstance(rec, dict):
+                    print(f"  {rec}"); continue
+
+                ts = (
+                    rec.get("timestamp") or rec.get("created_at") or
+                    rec.get("expires_at", "")
+                )[:19]
+
+                if history_type == "download":
+                    name   = rec.get("title") or rec.get("filename") or rec.get("music_id", "?")
+                    artist = rec.get("artist", "")
+                    status = rec.get("status", "")
+                    ts     = (rec.get("updated_at") or rec.get("created_at", ""))[:19]
+                    artist_str = f"  by {artist}" if artist else ""
+                    print(f"  [{ts}]  {name}{artist_str}  ({status})")
+
+                elif history_type == "publish":
+                    name = rec.get("filename") or rec.get("music_id", "?")
+                    print(f"  [{ts}]  {name}")
+
+                elif history_type == "login":
+                    revoked = "revoked" if rec.get("revoked") else "active"
+                    sid     = str(rec.get("session_id", ""))[-8:]
+                    print(f"  [{ts}]  session=…{sid}  ({revoked})")
+
+                elif history_type == "logs":
+                    level  = rec.get("level", "")
+                    source = rec.get("source", "")
+                    msg    = rec.get("message", "")
+                    print(f"  [{ts}]  [{level}] [{source}] {msg}")
+
+                else:
+                    # fallback generic
                     msg = (
                         rec.get("action") or rec.get("event") or
                         rec.get("filename") or rec.get("music_id") or str(rec)
                     )
-                    print(f"  [{ts}] {msg}")
-                else:
-                    print(f"  {rec}")
+                    print(f"  [{ts}]  {msg}")
         print(_hr())
+

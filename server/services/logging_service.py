@@ -188,17 +188,20 @@ async def get_history(user_id: str, history_type: str = "download") -> dict:
     if history_type == "download":
         async with db.execute(
             """
-            SELECT dh.id, dh.music_id, mm.filename, dh.peer_id,
-                   dh.timestamp, dh.status
-            FROM download_history dh
-            LEFT JOIN music_metadata mm ON mm.music_id = dh.music_id
-            WHERE dh.requester_id = ?
-            ORDER BY dh.timestamp DESC
+            SELECT dr.request_id, dr.music_id,
+                   mm.filename, mm.title, mm.artist,
+                   dr.status, dr.created_at, dr.updated_at
+            FROM download_requests dr
+            LEFT JOIN music_metadata mm ON mm.music_id = dr.music_id
+            WHERE dr.requester_id = ?
+              AND dr.status IN ('approved', 'in_progress', 'completed', 'failed')
+            ORDER BY dr.updated_at DESC
             LIMIT 100
             """,
             (user_id,),
         ) as cur:
             rows = await cur.fetchall()
+
 
     elif history_type == "publish":
         async with db.execute(
